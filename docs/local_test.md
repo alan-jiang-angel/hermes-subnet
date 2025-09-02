@@ -236,6 +236,7 @@ Balance:
 
 (env_test) [env_test] cd network-hermes-subnet
 
+(env_test) [env_test] git checkout feat/develop
 
 (env_test) [network-hermes-subnet] uv sync
 

@@ -1,18 +1,11 @@
-import os
-import sys
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import StreamingResponse
 import json
 import bittensor as bt
 from typing import Any
-
 from loguru import logger
-
 from common.protocol import ChatCompletionRequest, OrganicNonStreamSynapse, OrganicStreamSynapse, SyntheticStreamSynapse
-
-sys.path.append(os.path.abspath("/Users/demon/Desktop/work/onf/subql-graphql-agent/examples"))
-from common.protocol import CapacitySynapse, SyntheticStreamSynapse
-from server import stream_chat_completion
+from common.protocol import SyntheticStreamSynapse
 
 
 app = FastAPI()

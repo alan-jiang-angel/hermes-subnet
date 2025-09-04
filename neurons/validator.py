@@ -172,7 +172,7 @@ class Validator(BaseNeuron):
                 if uid == self.uid:
                     continue
                 tasks.append(
-                    asyncio.create_task(self.query_miner(uid, question, ground_truth))
+                    asyncio.create_task(self.query_miner(uid, trace_id, question, ground_truth))
                 )
             responses = await asyncio.gather(*tasks)
 
@@ -223,10 +223,10 @@ class Validator(BaseNeuron):
             logger.error(f"Error generating ground truth: {e}")
         return ''
 
-    async def query_miner(self, uid: int, question: str, ground_truth: str):
+    async def query_miner(self, uid: int, task_id: str, question: str, ground_truth: str):
         try:
             start_time = time.perf_counter()
-            synapse = SyntheticNonStreamSynapse(projectId=SUBQL_CID, question=question)
+            synapse = SyntheticNonStreamSynapse(id=task_id, projectId=SUBQL_CID, question=question)
             r = await self.dendrite.forward(
                 axons=self.settings.metagraph.axons[uid],
                 synapse=synapse,

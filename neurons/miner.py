@@ -183,7 +183,7 @@ class Miner(BaseNeuron):
             synapse.response = {"error": "No agent found"}
             return synapse
 
-        with Timer(label=f"Generating query for task: {synapse.model_dump_json()}"):
+        with Timer(label=f"[Miner] Generating answer for task: {synapse.id}") as t:
             # response = await self.server_agent.query_no_stream(
             #     synapse.question,
             # )
@@ -198,11 +198,12 @@ class Miner(BaseNeuron):
                 {"messages": [{"role": "user", "content": synapse.question}]},
                 config={"callbacks": [counter]}
             )
-            logger.info(f"Multi-agent response: {r}")
+            # logger.info(f"Multi-agent response: {r}")
             response = r.get('messages')[-1].content
+            t.response = response
 
         synapse.response = response
-        logger.info(f"Generated response: {synapse.response}")
+        # logger.info(f"Generated response: {synapse.response}")
         return synapse
 
     async def forward_organic_non_stream(self, synapse: OrganicNonStreamSynapse) -> OrganicNonStreamSynapse:
@@ -255,7 +256,7 @@ class Miner(BaseNeuron):
         # miner_agent_with_counter = self.miner_agent.with_config({"callbacks": [counter]})
 
         def miner_router(state):
-            logger.info(f'----min router---{state}')
+            # logger.info(f'----min router---{state}')
             messages = state["messages"]
             for m in messages:
                 # TODO: check tool call has real output

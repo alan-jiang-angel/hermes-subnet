@@ -6,6 +6,7 @@ from loguru import logger
 
 class Timer:
     def __init__(self, label="", metadata=None):
+        self.response = ''
         self.label = label
         self.elapsed = 0.0
         self.metadata = metadata or {}
@@ -21,4 +22,9 @@ class Timer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end_time = time.perf_counter()
         self.final_time = self.end_time - self.start_time
-        logger.info(f"[Timer] {self.label} took {self.final_time:.4f} seconds")
+        # logger.info(f"[Timer] {self.label} took {self.final_time:.4f} seconds")
+        logger.info(f"""
+[Timer] {self.label}\n
+  answer: {self.response}\n
+  cost: {self.final_time:.4f}s
+""")

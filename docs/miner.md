@@ -306,7 +306,7 @@ Now that we have added a tool, let's check if it works.
 
 From the miner's perspective:
 
-![](/Users/demon/Desktop/work/onf/network-hermes-subnet/docs/miner_improve.jpg)
+![](./miner_improve.png)
 
 1、The miner receives a challenge
 
@@ -323,6 +323,6 @@ Tool usage stats: {'query_indexer_rewards': 1}
 
 Switching to the Validator's perspective:
 
-![validator_2.jpg](/Users/demon/Desktop/work/onf/network-hermes-subnet/docs/validator_2.jpg)
+![validator_2.jpg](./validator_2.png)
 
 We can see that, while maintaining accuracy, the miner's response time has caught up with other miners, resulting in a final score comparable to the others, which represents a significant improvement.

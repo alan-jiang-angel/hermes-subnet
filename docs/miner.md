@@ -167,7 +167,7 @@ We will take Subquery Mainnet` (cid: QmfUNJC1Qz8m3F67sQmxrwjuSAu4WaCR1iBdPPdzBru
 
 Look at the logs below:
 
-![](/Users/demon/Desktop/work/onf/network-hermes-subnet/docs/miner_1.jpg)
+![](./miner_1.png)
 
 From the logs, we can see:
 

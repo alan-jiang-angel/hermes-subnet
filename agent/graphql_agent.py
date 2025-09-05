@@ -1,28 +1,22 @@
 import os
 import sys
 
-# TODO: improve
-sys.path.append(os.path.abspath("/Users/demon/Desktop/work/onf/subql-graphql-agent/examples"))
-from server import GraphQLAgent as ServerGraphQLAgent, ProjectConfig, stream_chat_completion, non_stream_chat_completion
-from working_example import GraphQLAgent as ExampleGraphQLAgent
+# Add the parent directory (agent) to sys.path so we can import subquery_graphql_agent as a package  
+agent_dir = os.path.dirname(__file__)
+if agent_dir not in sys.path:
+    sys.path.insert(0, agent_dir)
 
-stream_chat_completion = stream_chat_completion
-non_stream_chat_completion = non_stream_chat_completion
+# Import directly now that directory name doesn't have hyphens
+from subquery_graphql_agent.server import (
+    GraphQLAgent,
+    ProjectConfig
+)
 
-def initServerAgent() -> ServerGraphQLAgent:
-    schema_file_path = "/Users/demon/Desktop/work/onf/subql-graphql-agent/examples/schema.graphql"
-    with open(schema_file_path, 'r', encoding='utf-8') as f:
-        entity_schema = f.read()
-    project_config = ProjectConfig(
-        cid='xx',
-        endpoint="https://index-api.onfinality.io/sq/subquery/subquery-mainnet",
-        schema_content=entity_schema
-    )
-    agent = ServerGraphQLAgent(project_config)
-    return agent
-
-def initServerAgentWithConfig(project_config: ProjectConfig) -> ServerGraphQLAgent:
-    agent = ServerGraphQLAgent(project_config)
+def initServerAgentWithConfig(project_config: ProjectConfig) -> GraphQLAgent:
+    """
+    Create a GraphQLAgent with a pre-configured ProjectConfig.
+    """
+    agent = GraphQLAgent(project_config)
     return agent
 
 # def initExampleAgent() -> ExampleGraphQLAgent:

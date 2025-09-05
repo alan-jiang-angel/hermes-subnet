@@ -61,8 +61,14 @@ class Settings:
 
         wallet_name = os.environ.get("WALLET_NAME")
         hotkey = os.environ.get("HOTKEY")
-        logger.info(f"Instantiating wallet with name: {wallet_name}, hotkey: {hotkey}")
-        self._wallet = bt.wallet(name=wallet_name, hotkey=hotkey)
+        wallet_path = os.environ.get("WALLET_PATH")
+        
+        if wallet_path:
+            logger.info(f"Instantiating wallet with name: {wallet_name}, hotkey: {hotkey}, path: {wallet_path}")
+            self._wallet = bt.wallet(name=wallet_name, hotkey=hotkey, path=wallet_path)
+        else:
+            logger.info(f"Instantiating wallet with name: {wallet_name}, hotkey: {hotkey}")
+            self._wallet = bt.wallet(name=wallet_name, hotkey=hotkey)
         return self._wallet
 
     @property

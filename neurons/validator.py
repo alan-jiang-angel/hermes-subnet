@@ -148,7 +148,7 @@ class Validator(BaseNeuron):
             question = question_generator.generate_question(SUBQL_CID, entity_schema, self.llm)
             trace_id = str(uuid4())
 
-            logger.info(f"\n🤖 generate sythetic challenge: {question}", traceId=trace_id)
+            logger.info(f"\n🤖 generate synthetic challenge: {question}", traceId=trace_id)
 
             # generate ground truth
             start_time = time.perf_counter()
@@ -167,10 +167,9 @@ class Validator(BaseNeuron):
             # query all miner
             tasks = []
             uids = self.settings.miners()
+            uids = [uid for uid in uids if uid != self.uid]
             logger.info(f"query miners: {uids}")
             for uid in uids:
-                if uid == self.uid:
-                    continue
                 tasks.append(
                     asyncio.create_task(self.query_miner(uid, trace_id, question, ground_truth))
                 )
@@ -295,18 +294,7 @@ query_miner
         )
         logger.info(f"processed_weights: {suc, msg}")
 
-    def check_registered(self):
-        if not self.settings.subtensor.is_hotkey_registered(
-            netuid=self.settings.netuid,
-            hotkey_ss58=self.settings.wallet.hotkey.ss58_address,
-        ):
-            logger.error(
-                f"Wallet: {self.settings.wallet} is not registered on netuid {self.settings.netuid}."
-                f" Please register the hotkey using `btcli subnets register` before trying again"
-            )
-            exit()
 
-    
 if __name__ == "__main__":
     validator = Validator()
     asyncio.run(validator.start())

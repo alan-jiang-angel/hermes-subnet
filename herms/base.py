@@ -38,6 +38,8 @@ class BaseNeuron(ABC):
         # self.exampleAgent = subAgent.initExampleAgent()
 
     def start(self):
+        self.check_registered()
+
         external_ip = self.settings.external_ip or try_get_external_ip()
         serve_success = serve_extrinsic(
           subtensor=self.settings.subtensor,
@@ -54,3 +56,14 @@ class BaseNeuron(ABC):
             sys.exit(1)
 
         logger.info(msg)
+
+    def check_registered(self):
+        if not self.settings.subtensor.is_hotkey_registered(
+            netuid=self.settings.netuid,
+            hotkey_ss58=self.settings.wallet.hotkey.ss58_address,
+        ):
+            logger.error(
+                f"Wallet: {self.settings.wallet} is not registered on netuid {self.settings.netuid}."
+                f" Please register the hotkey using `btcli subnets register` before trying again"
+            )
+            sys.exit(1)

@@ -230,13 +230,13 @@ Balance:
 ```shell
 (env_test) [btcli] % cd ../
 
-(env_test) [env_test] git@github.com:subquery/network-SQT-subnet.git
+(env_test) [env_test] git@github.com:subquery/network-hermes-subnet.git
 
-(env_test) [env_test] cd network-SQT-subnet
+(env_test) [env_test] cd network-hermes-subnet
 
 (env_test) [env_test] git checkout feat/develop
 
-(env_test) [network-SQT-subnet] uv sync
+(env_test) [network-hermes-subnet] uv sync
 ```
 
 2、modify path：
@@ -302,7 +302,7 @@ SCORE_LLM_MODEL=o3
 * run：
 
 ```shell
-(env_test) [network-SQT-subnet] python -m neurons.validator
+(env_test) [network-hermes-subnet] python -m neurons.validator
 ```
 
 5、run miner：
@@ -334,5 +334,5 @@ LLM_MODEL=gpt-4o
 * run：
 
 ```shell
-(env_test) [network-SQT-subnet] python -m neurons.miner
+(env_test) [network-hermes-subnet] python -m neurons.miner
 ```

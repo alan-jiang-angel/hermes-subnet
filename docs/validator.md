@@ -46,9 +46,9 @@ uv python install 3.13
 2、clone `SN SubQuery`
 
 ```bash
-git clone git@github.com:subquery/network-SQT-subnet.git
+git clone git@github.com:subquery/network-hermes-subnet.git
 
-cd network-SQT-subnet
+cd network-hermes-subnet
 
 # sync and create venv
 uv sync
@@ -56,7 +56,7 @@ uv sync
 source .venv/bin/activate
 
 # install btcli
-(network-SQT-subnet) uv pip install bittensor-cli 
+(network-hermes-subnet) uv pip install bittensor-cli 
 ```
 
 ### Bittensor wallet
@@ -67,7 +67,7 @@ We use `btcli` to create wallet.
 
 ```bash
 # this will need you to input your own password to proceed
-(network-SQT-subnet) % 
+(network-hermes-subnet) % 
 btcli wallet new_coldkey --wallet.name validator
 ```
 
@@ -76,14 +76,14 @@ btcli wallet new_coldkey --wallet.name validator
 2、Create a hotkey
 
 ```bash
-(network-SQT-subnet) % 
+(network-hermes-subnet) % 
 btcli wallet new_hotkey --wallet.name validator --wallet.hotkey default
 ```
 
 3、Register in `SN SubQuery`
 
 ```bash
-(network-SQT-subnet) % 
+(network-hermes-subnet) % 
 btcli subnet register --wallet.name validator --wallet.hotkey default
 ```
 
@@ -100,7 +100,7 @@ A validator’s stake is a crucial metric for Extraction in Bittensor. To qualif
 As an option, you may perform a **self-stake**:
 
 ```bash
-(network-SQT-subnet) % 
+(network-hermes-subnet) % 
 btcli stake add \
   --wallet.name validator \
   --wallet.hotkey default \
@@ -114,7 +114,7 @@ Once everything is prepared, it’s time to launch the validator.
 First, create a configuration file.
 
 ```bash
-(network-SQT-subnet) %
+(network-hermes-subnet) %
 cp .env.validator.example .env.validator
 ```
 
@@ -167,7 +167,7 @@ Configuration Parameters:
 Last,  launch the Validator：
 
 ```bash
-(network-SQT-subnet) % 
+(network-hermes-subnet) % 
 python -m neurons.validator
 ```
 

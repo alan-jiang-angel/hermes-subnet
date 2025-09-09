@@ -186,7 +186,7 @@ class Validator(BaseNeuron):
                 question = await question_generator.generate_question_with_agent(cid, project_config.schema_content, self.server_agents[cid])
                 trace_id = str(uuid4())
 
-                logger.info(f"\n🤖 generate synthetic challenge: {question}", traceId=trace_id)
+            logger.info("\n🤖 generate synthetic challenge: {}", question, traceId=trace_id)
 
                 # generate ground truth
                 start_time = time.perf_counter()
@@ -196,10 +196,11 @@ class Validator(BaseNeuron):
                     logger.warning("Failed to generate ground truth.", traceId=trace_id)
                     continue
 
-                # TODO: check ground truth has real content
-                end_time = time.perf_counter()
-                ground_cost = end_time - start_time
-                logger.info(f"\n🤖 generate ground_truth: {ground_truth} cost: {ground_cost}s")
+            # TODO: check ground truth has real content
+            
+            end_time = time.perf_counter()
+            ground_cost = end_time - start_time
+            logger.info("\n🤖 generate ground_truth: {} cost: {}s", ground_truth, ground_cost, traceId=trace_id)
 
                 logger.info(f"query miners: {uids}")
                 # query all miner
@@ -298,14 +299,14 @@ class Validator(BaseNeuron):
             )
             end_time = time.perf_counter()
             synapse.response = r.response
-            logger.info(f"""
+            logger.info("""
 query_miner 
-  miner: {uid}\n
-  question: {question}\n
-  answer: {synapse.response}\n
-  ground_truth: {ground_truth}\n
-  cost: {end_time - start_time}s
-""")
+  miner: {}
+  question: {}
+  answer: {}
+  ground_truth: {}
+  cost: {}s
+""", uid, question, synapse.response, ground_truth, end_time - start_time)
             synapse.elapsed_time = end_time - start_time
             return synapse
 

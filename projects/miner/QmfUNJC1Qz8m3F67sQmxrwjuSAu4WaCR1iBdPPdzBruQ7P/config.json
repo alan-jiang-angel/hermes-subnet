@@ -2398,25 +2398,19 @@
     },
     "specVersion": "1.0.0"
   },
-  "domain_name": "SubQuery Network Projects and Deployments on Base (chain 8453)",
+  "domain_name": "SubQuery Project Indexing",
   "domain_capabilities": [
-    "Query Project entities (owner, type, metadata, deploymentId, deploymentMetadata, created/updated timestamps, totalReward, totalBoost, totalAllocation, boostAllocationRatio, createdBlock, lastEvent) and traverse to their deployments",
-    "Query Deployment entities (metadata, parent project, createdTimestamp, createdBlock, lastEvent) and expand relationships to indexers and plans",
-    "Rank and filter Projects by reward/allocation metrics (totalReward, totalBoost, totalAllocation, boostAllocationRatio) and by ProjectType or owner",
-    "Analyze project version history by listing all Deployments per Project and counting deployments",
-    "Track recent on-chain activity using createdBlock and lastEvent fields to see latest updates on Base (8453)",
-    "Assess operator participation and service availability by inspecting Deployment.indexers and Deployment.plans relationships"
+    "Query Project and Deployment data and relationships",
+    "Analyze reward distribution metrics and trends",
+    "Track deployment versions and operator activities",
+    "Monitor project creation and update events"
   ],
-  "decline_message": "I'm specialized in Unknown Project data queries (SubQuery Network projects and deployments on Base 8453). I can help you with Project and Deployment records, reward/boost/allocation metrics, timestamps, and event markers, but I cannot assist with unrelated topics like token prices, generic wallet balances, or NFT metadata. Please ask me about Unknown Project data instead.",
+  "decline_message": "I'm specialized in SubQuery Project Indexing data queries. I can help you with project and deployment data, but I cannot assist with unrelated topics. Please ask me about SubQuery Project Indexing data instead.",
   "suggested_questions": [
-    "List the top 10 Projects by totalReward and include their boostAllocationRatio",
-    "Show all Deployments for a given Project ID and include createdTimestamp and lastEvent",
-    "Which Projects of type SUBGRAPH have the highest totalBoost?",
-    "Find Projects created after a specific block number and sort by createdTimestamp descending",
-    "Which Deployments have active indexers listed under indexers?",
-    "What is the boostAllocationRatio distribution across all Projects (min, max, and top 5)?",
-    "Show Projects owned by a specific wallet address and include their deployments",
-    "Can you show me a sample GraphQL query to fetch a Project with its deployments and key metrics?"
+    "Show me recent Project creation events",
+    "What are the top Projects by totalReward?",
+    "How many Deployments were created in the last day?",
+    "Can you show me a sample GraphQL query for Project?"
   ],
   "authorization": null
 }

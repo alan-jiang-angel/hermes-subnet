@@ -99,7 +99,7 @@ First, create a configuration file.
 
 ```bash
 (network-hermes-subnet) %
-cp .env.example .env
+cp .env.miner.example .env.miner
 ```
 
 Second, edit the file to apply your own settings:

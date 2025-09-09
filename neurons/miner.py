@@ -60,15 +60,16 @@ class Miner(BaseNeuron):
         
         self.agents = {}
 
+
     async def start(self):
         super().start()
 
         self.axon = bt.axon(
-            wallet=self.settings.miner_wallet, 
-            port=self.settings.miner_port,
+            wallet=self.settings.wallet, 
+            port=self.settings.port,
             ip=self.settings.external_ip,
             external_ip=self.settings.external_ip,
-            external_port=self.settings.miner_port
+            external_port=self.settings.port
         )
 
         self.axon.attach(
@@ -100,7 +101,7 @@ class Miner(BaseNeuron):
 
         self.axon.start()
         logger.info(f"Miner starting at block: {self.settings.subtensor.block}")
-        logger.info(f"Axon serving on port: {self.settings.miner_port}")
+        logger.info(f"Axon serving on port: {self.settings.port}")
         logger.info(f"Axon created: {self.axon}")
         logger.info(f"Miner starting at block: {self.settings.subtensor.block}")
 

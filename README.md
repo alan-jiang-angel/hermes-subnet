@@ -110,8 +110,8 @@ uv sync
 source .venv/bin/activate
 
 # Configure validator settings
-cp .env.example .env
-# Edit .env with your configuration (set appropriate WALLET_NAME and other validator-specific settings)
+cp .env.validator.example .env.validator
+# Edit .env.validator with your configuration
 
 # Run validator
 python -m neurons.validator
@@ -144,8 +144,8 @@ uv sync
 source .venv/bin/activate
 
 # Configure miner settings
-cp .env.example .env
-# Edit .env with your configuration (set appropriate WALLET_NAME and other miner-specific settings)
+cp .env.miner.example .env.miner
+# Edit .env.miner with your configuration
 
 # Run miner
 python -m neurons.miner

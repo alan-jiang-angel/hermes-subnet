@@ -26,6 +26,7 @@ class BaseNeuron(ABC):
         Returns the role of the neuron.
         '''
 
+
     def __init__(self):
         Settings.load_env_file(self.role)
         self.settings = Settings()

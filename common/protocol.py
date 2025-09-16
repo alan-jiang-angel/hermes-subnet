@@ -11,6 +11,7 @@ class ChatCompletionMessage(BaseModel):
     content: str = Field(..., description="Message content")
 
 class ChatCompletionRequest(BaseModel):
+    id: Optional[str] = Field(default=None, description="Unique identifier for the request")
     model: str = Field(default="gpt-4o-mini", description="Model to use")
     messages: List[ChatCompletionMessage] = Field(..., description="List of messages")
     stream: bool = Field(default=False, description="Whether to stream responses")

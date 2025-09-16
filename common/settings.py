@@ -19,7 +19,7 @@ class Settings:
     def load_env_file(cls, role: str):
         env_file = f".env.{role}"
         dotenv.load_dotenv(env_file)
-        logger.info(f"Loaded {env_file} file")
+        logger.debug(f"Loaded {env_file} file")
 
     @property
     def subtensor(self) -> Subtensor:

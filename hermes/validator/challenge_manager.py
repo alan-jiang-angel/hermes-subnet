@@ -7,8 +7,9 @@ from uuid import uuid4
 import bittensor as bt
 from langchain_openai import ChatOpenAI
 from loguru import logger
+from multiprocessing.synchronize import Event
 from common.agent_manager import AgentManager
-from common.protocol import OrganicNonStreamSynapse, SyntheticNonStreamSynapse
+from common.protocol import SyntheticNonStreamSynapse
 from common.settings import Settings
 from common.table_formatter import table_formatter
 from common.timer import Timer
@@ -19,7 +20,6 @@ from hermes.validator.workload_manager import WorkloadManager
 
 class ChallengeManager:
     settings: Settings
-    save_project_dir: Path
     uid: int
     challenge_interval: int
     dendrite: bt.Dendrite
@@ -28,6 +28,7 @@ class ChallengeManager:
     agent_manager: AgentManager
     scorer_manager: ScorerManager
     workload_manager: WorkloadManager
+    event_stop: Event
 
     def __init__(
         self, 
@@ -35,15 +36,16 @@ class ChallengeManager:
         save_project_dir: str | Path, 
         uid: int, 
         dendrite: bt.Dendrite,
+        organic_score_queue: list,
         synthetic_model_name: str | None = None,
         score_model_name: str | None = None,
+        event_stop: Event = None
     ):
         self.settings = settings
 
         # Configure synthetic challenge loop interval (default: 10 minutes)
         self.challenge_interval = int(os.getenv("CHALLENGE_INTERVAL", 600))  # seconds
         logger.info(f"[ChallengeManager] Synthetic challenge interval set to {self.challenge_interval} seconds")
-
 
         self.uid = uid
         self.dendrite = dendrite
@@ -67,36 +69,43 @@ class ChallengeManager:
         )
 
         self.scorer_manager = ScorerManager(llm_score=self.llm_score)
-        self.workload_manager = WorkloadManager(self)
+        self.workload_manager = WorkloadManager(
+            challenge_manager=self,
+            organic_score_queue=organic_score_queue
+        )
+
+        self.event_stop = event_stop
 
         logger.info(f"[ChallengeManager] Using LLM model: {synthetic_model_name} for synthetic challenge")
         logger.info(f"[ChallengeManager] Using LLM model: {score_model_name} for scoring")
 
     async def start(self):
+        mode = os.getenv("PROJECT_PULL_MODE", "pull")
+
         # pull projects & init agents
-        await self.agent_manager.start(pull=False)
+        await self.agent_manager.start(mode == "pull")
 
         self.task = asyncio.create_task(self.workload_manager.compute_organic_task())
 
-        while True:
+        while not self.event_stop.is_set():
             await asyncio.sleep(self.challenge_interval)
 
             projects = self.agent_manager.get_projects()
             if not projects:
-                logger.warning("No projects found, skipping this round.")
+                logger.warning("[ChallengeManager] No projects found, skipping this round.")
                 await asyncio.sleep(self.challenge_interval)
                 continue
 
             uids = [uid for uid in self.settings.miners() if uid != self.uid]
             if not uids:
-                logger.warning("No available miners for challenge.")
+                logger.warning("[ChallengeManager] No available miners for challenge, skipping this round.")
                 await asyncio.sleep(self.challenge_interval)
                 continue
 
             project_score_matrix = []
 
             for cid, project_config in projects.items():
-                trace_id = str(uuid4())
+                challenge_id = str(uuid4())
                 
                 # generate challenge
                 question = question_generator.generate_question(cid, project_config.schema_content, self.llm_synthetic)
@@ -104,62 +113,75 @@ class ChallengeManager:
                     continue
 
                 # Create synthetic challenge table
-                challenge_output = table_formatter.create_synthetic_challenge_table(question)
-                table_formatter.log_with_newline(challenge_output, "info", traceId=trace_id)
+                challenge_output = table_formatter.create_synthetic_challenge_table(question, challenge_id)
+                table_formatter.log_with_newline(challenge_output, "info")
 
                 # generate ground truth
                 success, ground_truth, ground_cost = await self.generate_ground_truth(cid, question)
                 if not success:
-                    logger.warning(f"Failed to generate ground truth. {trace_id}, {ground_truth}")
+                    logger.warning(f"[ChallengeManager] - {challenge_id} Failed to generate ground truth. {ground_truth}")
                     continue
                 
                 # Create ground truth tables
-                ground_truth_output = table_formatter.create_ground_truth_tables(ground_truth, ground_cost)
-                table_formatter.log_with_newline(ground_truth_output, "info", traceId=trace_id)
+                ground_truth_output = table_formatter.create_ground_truth_tables(ground_truth, ground_cost, challenge_id)
+                table_formatter.log_with_newline(ground_truth_output, "info")
 
                 # query all miner
-                logger.info(f"query miners: {uids}")
+                logger.info(f"[ChallengeManager] - {challenge_id} query miners: {uids}")
                 responses = await asyncio.gather(
-                    *(self.query_miner(uid, cid, trace_id, question, ground_truth) for uid in uids)
+                    *(self.query_miner(
+                        uid=uid,
+                        cid=cid,
+                        challenge_id=challenge_id,
+                        question=question,
+                        ground_truth=ground_truth
+                    ) for uid in uids)
                 )
 
                 # score result
-                zip_scores, _, _ = await self.scorer_manager.compute_challenge_score(ground_truth, ground_cost, responses)
+                zip_scores, _, _ = await self.scorer_manager.compute_challenge_score(
+                    ground_truth, 
+                    ground_cost, 
+                    responses,
+                    challenge_id=challenge_id
+                )
                 project_score_matrix.append(zip_scores)
 
-            workload_score = self.workload_manager.compute_workload_score(uids)
-            logger.info(f"workload score: {workload_score}")
-            
-            self.scorer_manager.update_scores(uids, project_score_matrix, workload_score)
-            # await asyncio.sleep(self.challenge_interval)
+            workload_score = await self.workload_manager.compute_workload_score(uids, challenge_id=challenge_id)
+            self.scorer_manager.update_scores(
+                uids, 
+                project_score_matrix, 
+                workload_score, 
+                challenge_id=challenge_id
+            )
 
     async def generate_ground_truth(self, cid: str, question: str) -> Tuple[bool, str, int]:
         start_time = time.perf_counter()
         success = False
-        ground_truth = ""
+        result = ""
         try:
             agent = self.agent_manager.get_agent(cid)
             if not agent:
-                ground_truth = f"No server agent found for cid: {cid}"
+                result = f"No server agent found for cid: {cid}"
             else:
                 response = await agent.query_no_stream(question)
                 success = True
-                ground_truth = response.get('messages', [])[-1].content
+                result = response.get('messages', [])[-1].content
         except Exception as e:
-            ground_truth = str(e)
+            result = str(e)
 
         finally:
-            return [success, ground_truth, time.perf_counter() - start_time]
+            return [success, result, time.perf_counter() - start_time]
 
     async def query_miner(
         self, 
         uid: int, 
         cid: str, 
-        task_id: str, 
+        challenge_id: str, 
         question: str, 
         ground_truth: str
     ):
-        synapse = SyntheticNonStreamSynapse(id=task_id, project_id=cid, question=question)
+        synapse = SyntheticNonStreamSynapse(id=challenge_id, project_id=cid, question=question)
         try:
             with Timer() as t:
                 r = await self.dendrite.forward(
@@ -177,6 +199,7 @@ class ChallengeManager:
                 uid=uid,
                 question=question,
                 elapsed_time=elapsed_time,
+                challenge_id=challenge_id,
                 miner_answer=miner_answer,
                 ground_truth=ground_truth if miner_answer else None
             )
@@ -185,10 +208,7 @@ class ChallengeManager:
             synapse.elapsed_time = elapsed_time
 
         except Exception as e:
-            logger.warning("🔍 MINER RESPONSE [UID: {}] - ❌ Failed to query: {}", uid, e)
+            logger.warning("🔍 [ChallengeManager] - {} MINER RESPONSE [UID: {}] - ❌ Failed to query: {}", challenge_id, uid, e)
             synapse.error = str(e)
         finally:
             return synapse
-
-    def tick_organic(self, uid: int, response: OrganicNonStreamSynapse):
-        self.workload_manager.collect(uid, response)

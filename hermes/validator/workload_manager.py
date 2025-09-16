@@ -1,6 +1,7 @@
 import asyncio
 from collections import deque
-from typing import Any
+import os
+from typing import Any, List, Tuple
 import time
 from collections import defaultdict
 import threading
@@ -49,46 +50,73 @@ class WorkloadManager:
     uid_organic_response_history: dict[int, deque[OrganicNonStreamSynapse]]
     uid_organic_workload_counter: dict[int, BucketCounter]
     challenge_manager: "ChallengeManager"
+    organic_score_queue: list
 
     uid_sample_scores: dict[int, deque[float]]
-    interval: int = 30  # seconds
+    organic_task_compute_interval: int  # seconds
+    organic_task_concurrency: int
+    organic_task_sample_rate: int
+    organic_workload_counter_full_purge_interval: int
+    last_full_purge_time: float = time.time()
 
-    def __init__(self, challenge_manager: "ChallengeManager"):
-        self.uid_organic_workload_counter = defaultdict(BucketCounter)
-        self.uid_organic_response_history = defaultdict(lambda: deque(maxlen=20))
-        
-        self.uid_sample_scores = {}
+    def __init__(self, challenge_manager: "ChallengeManager", organic_score_queue: list):
         self.challenge_manager = challenge_manager
+        self.organic_score_queue = organic_score_queue
 
-    def collect(self, uid: int, response: OrganicNonStreamSynapse):
-        cur = self.uid_organic_workload_counter[uid].tick()
+        self.uid_sample_scores = {}
+        self.uid_organic_workload_counter = defaultdict(BucketCounter)
 
-        # sample every 5th response
-        if cur % 1 == 0:
-            if uid not in self.uid_organic_response_history:
-                self.uid_organic_response_history[uid] = deque(maxlen=20)
-            self.uid_organic_response_history[uid].append(response)
+        self._purge_lock = asyncio.Lock()
 
-        logger.info('after collect, uid_organic_response_history: {}', self.uid_organic_response_history)
-        logger.info('uid, cur {}', (uid, cur))
+        self.organic_task_compute_interval = int(os.getenv("WORKLOAD_ORGANIC_TASK_COMPUTE_INTERVAL", 30))
+        self.organic_task_concurrency = int(os.getenv("WORKLOAD_ORGANIC_TASK_CONCURRENCY", 5))
+        self.organic_task_sample_rate = int(os.getenv("WORKLOAD_ORGANIC_TASK_SAMPLE_RATE", 5))
+        self.organic_workload_counter_full_purge_interval = int(os.getenv("WORKLOAD_ORGANIC_WORKLOAD_COUNTER_FULL_PURGE_INTERVAL", 3600))
 
-    def compute_workload_score(self, uids):
+    async def collect(self, uid: int, response: OrganicNonStreamSynapse = None):
+         async with self._purge_lock:
+            cur = self.uid_organic_workload_counter[uid].tick()
+            return cur
+
+    async def purge(self, uids: list[int]):
+        for uid in uids:
+            if uid in self.uid_organic_workload_counter:
+                self.uid_organic_workload_counter[uid].cleanup()
+
+        now = time.time()
+        if now - self.last_full_purge_time > self.organic_workload_counter_full_purge_interval:
+            async with self._purge_lock:
+                to_delete = []
+                for uid, counter in list(self.uid_organic_workload_counter.items()):
+                    counter.cleanup()
+                    if counter.count() == 0:
+                        to_delete.append(uid)
+                for uid in to_delete:
+                    del self.uid_organic_workload_counter[uid]
+                self.last_full_purge_time = now
+    
+    async def compute_workload_score(self, uids: list[int], challenge_id: str = "") -> List[float]:
+        await self.purge(uids)
+
         workload_counts = [self.uid_organic_workload_counter[uid].count() for uid in uids]
         min_workload = min(workload_counts) if workload_counts else 0
         max_workload = max(workload_counts) if workload_counts else 1
 
+        log_quality_scores = []
+
         scores = [0.0] * len(uids)
         for idx, uid in enumerate(uids):
             quantity = workload_counts[idx]
-            quality_scores = self.uid_sample_scores.get(uid, [])
+            uid_quality_scores = self.uid_sample_scores.get(uid, [])
+            log_quality_scores.append(list(uid_quality_scores))
 
             # quality score（EMA）
-            if not quality_scores:
+            if not uid_quality_scores:
                 quality_ema = 0.0
             else:
                 alpha = 0.7
                 quality_ema = None
-                for score in quality_scores:
+                for score in uid_quality_scores:
                     if quality_ema is None:
                         quality_ema = score
                     else:
@@ -96,43 +124,55 @@ class WorkloadManager:
 
             # normalized workload score
             if max_workload == min_workload:
-                normalized_workload = 0.5 if len(uids) > 1 else 1.0
+                normalized_workload = 0 if min_workload == 0 else 0.5
             else:
                 normalized_workload = (quantity - min_workload) / (max_workload - min_workload)
 
             total_score = 0.5 * quality_ema + 0.5 * normalized_workload
             scores[idx] = total_score
 
+        logger.info(f"[WorkloadManager] - {challenge_id}  workload_counts: {workload_counts}, log_quality_scores: {log_quality_scores}, workload_score: {scores}")
         return scores
 
     async def compute_organic_task(self):
         while True:
-            await asyncio.sleep(self.interval)
-
+            await asyncio.sleep(self.organic_task_compute_interval)
             try:
-                logger.info(f"[WorkloadManager] Computing organic workload scores...{self.uid_organic_response_history}")
+                for i in range(self.organic_task_concurrency):
+                    logger.info(f"[WorkloadManager] Round {i+1}/{self.organic_task_concurrency} of computing organic workload scores")
+                    
+                    if self.organic_score_queue:
+                        miner_uid, resp_dict = self.organic_score_queue.pop(0)
+                        response = OrganicNonStreamSynapse(**resp_dict)
 
-                for uid, responses in self.uid_organic_response_history.items():
-                    if not responses:
-                        logger.warning(f"[WorkloadManager] No responses to process for uid {uid}")
-                        continue
-                    r = responses.popleft()
-                    q = r.completion.messages[-1].content
+                        miner_uid_work_load = await self.collect(miner_uid)
+                        if miner_uid_work_load % self.organic_task_sample_rate != 0:
+                            logger.info(f"[WorkloadManager] Skipping organic task computation for miner: {miner_uid} at count {miner_uid_work_load}")
+                            continue
 
-                    logger.info(f"[WorkloadManager] Computing organic workload score for uid {uid}, question: {q}")
+                        q = response.completion.messages[-1].content
+                        logger.info(f"[WorkloadManager] compute organic task({response.id}) for miner: {miner_uid}, response: {response}. question: {q}")
 
-                    success, ground_truth, ground_cost = await self.challenge_manager.generate_ground_truth(r.project_id, q)
-                    if not success:
-                        logger.warning(f"[WorkloadManager] Failed to generate ground truth {ground_truth}")
-                        continue
-                    logger.info(r)
-                    logger.info(r.response)
-                    zip_scores, _, _ = await self.challenge_manager.scorer_manager.compute_challenge_score(ground_truth, ground_cost, [r])
+                        success, ground_truth, ground_cost = await self.challenge_manager.generate_ground_truth(response.project_id, q)
+                        if not success:
+                            logger.warning(f"[WorkloadManager] Failed to generate ground truth for task({response.id}). {ground_truth}")
+                            continue
+            
+                        logger.info(f"[WorkloadManager] Generated task({response.id}) ground truth: {ground_truth}, cost: {ground_cost}, miner.response: {response.response}")
+                        zip_scores, _, _ = await self.challenge_manager.scorer_manager.compute_challenge_score(
+                            ground_truth, 
+                            ground_cost, 
+                            [response],
+                            challenge_id=response.id
+                        )
 
-                    if uid not in self.uid_sample_scores:
-                        self.uid_sample_scores[uid] = deque(maxlen=20)
+                        if miner_uid not in self.uid_sample_scores:
+                            self.uid_sample_scores[miner_uid] = deque(maxlen=20)
 
-                    self.uid_sample_scores[uid].append(zip_scores[0])
-                    logger.info(f"[WorkloadManager] Updated organic workload score for uid {uid},{zip_scores[0]}, {self.uid_sample_scores}")
+                        self.uid_sample_scores[miner_uid].append(zip_scores[0])
+                        logger.info(f"[WorkloadManager] Updated organic workload score for uid {miner_uid},{zip_scores[0]}, {self.uid_sample_scores}")
+
+                    await asyncio.sleep(1)
+
             except Exception as e:
                 logger.error(f"[WorkloadManager] Error computing organic workload scores: {e}")

@@ -16,7 +16,6 @@ class BaseNeuron(ABC):
     non_stream_chat_completion: Any
     # exampleAgent: Any
     settings: Settings
-    should_exit: bool
     uid: int
     
     @property
@@ -29,22 +28,18 @@ class BaseNeuron(ABC):
 
     def __init__(self, *args, **kwargs):
         # Configure loguru first before any logging
-        configure_loguru(*args, **kwargs)
+        # configure_loguru(*args, **kwargs)
         
         Settings.load_env_file(self.role)
         self.settings = Settings()
-        self.should_exit = False
-        # self.serverAgent = subAgent.initServerAgent()
-        # self.non_stream_chat_completion = subAgent.non_stream_chat_completion
-        # self.exampleAgent = subAgent.initExampleAgent()
-
-    def start(self):
-        self.check_registered()
 
         self.uid = self.settings.metagraph.hotkeys.index(
             self.settings.wallet.hotkey.ss58_address
         )
-        
+
+    def start(self):
+        self.check_registered()
+
         external_ip = self.settings.external_ip or try_get_external_ip()
         serve_success = serve_extrinsic(
           subtensor=self.settings.subtensor,

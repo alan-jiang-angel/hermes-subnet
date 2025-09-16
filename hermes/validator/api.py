@@ -13,7 +13,6 @@ router = APIRouter()
 
 @router.post("/{cid}/chat/completions")
 async def chat(cid: str, request: Request, body: ChatCompletionRequest):
-    logger.info(f"Received chat completion request for cid: {cid}, body: {body}")
     v: "Validator" = request.app.state.validator
     dendrite: bt.Dendrite = v.dendrite
 

@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+import signal
 import sys
 import httpx
 from loguru import logger
@@ -194,6 +195,11 @@ IF RELATED to {domain_name} data:
 
 For missing user info (like "my rewards", "my tokens"), always ask for the specific wallet address or ID rather than fabricating data."""
 
+def kill_process_group():
+    try:
+        os.killpg(os.getpgid(0), signal.SIGKILL)
+    except Exception as e:
+        logger.error(f"Failed to kill process group: {e}")
 
 if __name__ == "__main__":
     ground_truth_cost = 15.0

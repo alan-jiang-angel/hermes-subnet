@@ -30,10 +30,10 @@ class TableFormatter:
             self.console.print(table)
         return capture.get().strip()
     
-    def create_miner_response_tables(self, uid: int, question: str, elapsed_time: float, 
+    def create_miner_response_tables(self, uid: int, question: str, elapsed_time: float, challenge_id: str = "",
                                    miner_answer: str = None, ground_truth: str = None) -> str:
         """Create formatted tables for miner response display"""
-        output_lines = [f"🔍 MINER RESPONSE [UID: {uid}]"]
+        output_lines = [f"🔍 MINER RESPONSE [UID: {uid} ({challenge_id})]"]
         
         # Question table
         output_lines.append(self.create_single_column_table("❓ Question", question))
@@ -55,16 +55,16 @@ class TableFormatter:
         
         return "\n".join(output_lines)
     
-    def create_synthetic_challenge_table(self, question: str) -> str:
+    def create_synthetic_challenge_table(self, question: str, challenge_id: str = "") -> str:
         """Create table for synthetic challenge display"""
-        return self.create_single_column_table("🤖 Synthetic Challenge", question, "bold green")
-    
-    def create_ground_truth_tables(self, ground_truth: str, generation_cost: float) -> str:
+        return self.create_single_column_table("🤖 Synthetic Challenge" + f" ({challenge_id})", question, "bold green")
+
+    def create_ground_truth_tables(self, ground_truth: str, generation_cost: float, challenge_id: str = "") -> str:
         """Create tables for ground truth display"""
         output_lines = []
         
         # Ground Truth table (single column)
-        output_lines.append(self.create_single_column_table("🤖 Ground Truth", ground_truth))
+        output_lines.append(self.create_single_column_table("🤖 Ground Truth" + f" ({challenge_id})", ground_truth))
         
         # Generation Cost table (two columns)
         output_lines.append(self.create_two_column_table("⏱️ Generation Cost", f"{generation_cost:.2f}s", 20))

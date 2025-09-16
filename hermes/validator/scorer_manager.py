@@ -21,23 +21,18 @@ class ScorerManager:
     async def compute_challenge_score(self, 
         ground_truth: str, 
         ground_cost: float, 
-        miner_synapses: List[SyntheticNonStreamSynapse]
+        miner_synapses: List[SyntheticNonStreamSynapse],
+        challenge_id: str = ""
     ) -> Tuple[List[float], List[float], List[float]]:
         ground_truth_scores = await asyncio.gather(
             *(self.cal_ground_truth_score(ground_truth, r) for r in miner_synapses)
         )
         ground_truth_scores = [float(s) for s in ground_truth_scores]
-        logger.info(f" ground_truth scores: {ground_truth_scores}")
-
         elapse_time = [r.elapsed_time for r in miner_synapses]
-        logger.info(f" elapse_time: {elapse_time}")
-
         elapse_weights = [utils.get_elapse_weight_quadratic(r.elapsed_time, ground_cost) for r in miner_synapses]
-        logger.info(f" elapse_weights: {elapse_weights}")
-
         zip_scores = [s * w for s, w in zip(ground_truth_scores, elapse_weights)]
-        logger.info(f" zip scores: {zip_scores}")
 
+        logger.info(f"[ScorerManager] - {challenge_id} ground_truth_scores: {ground_truth_scores}, elapse_time: {elapse_time}, elapse_weights: {elapse_weights}, zip_scores: {zip_scores}")
         return zip_scores, ground_truth_scores, elapse_weights
 
     async def cal_ground_truth_score(self, ground_truth: str, miner_synapse: SyntheticNonStreamSynapse):
@@ -51,7 +46,8 @@ class ScorerManager:
     def update_scores(self, 
         uids: List[int], 
         project_score_matrix: List[List[float]],
-        workload_score: List[float] | None
+        workload_score: List[float] | None,
+        challenge_id: str = ""
     ):
         if not uids or not project_score_matrix:
             return
@@ -61,16 +57,11 @@ class ScorerManager:
         else:
             merged = project_score_matrix
 
-        logger.info(f"project_score_matrix; {project_score_matrix}")
-
-        logger.info(f"merged; {merged}")
         score_matrix = np.array(merged)
-        logger.info(f"score_matrix: {score_matrix}")
-
         score_matrix = score_matrix.sum(axis=0)
-        logger.info(f"project sum score: {score_matrix}")
-
-        self.ema.update(uids, score_matrix.tolist())
+        
+        new_scores = self.ema.update(uids, score_matrix.tolist())
+        logger.info(f"[ScorerManager] - {challenge_id} uids: {uids}, project_score_matrix: {project_score_matrix}, workload_score: {workload_score}, merged: {merged}, score_matrix: {score_matrix.tolist()}, updated_ema_scores: {new_scores}")
 
     def get_last_scores(self):
         return self.ema.last_scores

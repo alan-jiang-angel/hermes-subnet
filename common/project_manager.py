@@ -2,8 +2,8 @@ from dataclasses import asdict, dataclass
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
-
 import aiohttp
 import httpx
 from langchain_openai import ChatOpenAI
@@ -106,7 +106,7 @@ class ProjectManager:
         board_url = os.environ.get('BOARD_SERVICE')
         if not board_url:
             logger.error("[ProjectManager] BOARD_SERVICE environment variable is not set.")
-            exit(1)
+            sys.exit(1)
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{board_url}/project/list", headers=headers, json=data) as resp:
                 response_data = await resp.json()

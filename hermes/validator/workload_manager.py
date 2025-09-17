@@ -15,24 +15,34 @@ if TYPE_CHECKING:
     from hermes.validator.challenge_manager import ChallengeManager
 
 class BucketCounter:
-    def __init__(self, window_hours=3):
+    def __init__(self, uid: int, hotkey: str, window_hours=3):
+        self.uid = uid
+        self.hotkey = hotkey
         self.bucket_seconds = 3600 # 1 hour per bucket
         self.window_buckets = window_hours
         self.buckets = defaultdict(int)  # {bucket_id: count}
         self._lock = threading.Lock()
 
-    def tick(self) -> int:
+    def tick(self, hotkey: str) -> int:
         now = int(time.time())
         bucket_id = now // self.bucket_seconds
         with self._lock:
+            if hotkey != self.hotkey:
+                self.buckets = defaultdict(int)
+                self.hotkey = hotkey
+        
             self.buckets[bucket_id] += 1
             return self.buckets[bucket_id]
 
-    def count(self):
+    def count(self, hotkey: str):
         now = int(time.time())
         current_bucket = now // self.bucket_seconds
         total = 0
         with self._lock:
+            if hotkey != self.hotkey:
+                self.buckets = defaultdict(int)
+                self.hotkey = hotkey
+
             # calculate total in the last `window_buckets` buckets
             for i in range(self.window_buckets):
                 total += self.buckets.get(current_bucket - i, 0)
@@ -47,7 +57,6 @@ class BucketCounter:
 
 
 class WorkloadManager:
-    uid_organic_response_history: dict[int, deque[OrganicNonStreamSynapse]]
     uid_organic_workload_counter: dict[int, BucketCounter]
     challenge_manager: "ChallengeManager"
     organic_score_queue: list
@@ -64,7 +73,8 @@ class WorkloadManager:
         self.organic_score_queue = organic_score_queue
 
         self.uid_sample_scores = {}
-        self.uid_organic_workload_counter = defaultdict(BucketCounter)
+        # self.uid_organic_workload_counter = defaultdict(BucketCounter)
+        self.uid_organic_workload_counter = {}
 
         self._purge_lock = asyncio.Lock()
 
@@ -73,9 +83,12 @@ class WorkloadManager:
         self.organic_task_sample_rate = int(os.getenv("WORKLOAD_ORGANIC_TASK_SAMPLE_RATE", 5))
         self.organic_workload_counter_full_purge_interval = int(os.getenv("WORKLOAD_ORGANIC_WORKLOAD_COUNTER_FULL_PURGE_INTERVAL", 3600))
 
-    async def collect(self, uid: int, response: OrganicNonStreamSynapse = None):
+    async def collect(self, uid: int, hotkey: str, response: OrganicNonStreamSynapse = None):
          async with self._purge_lock:
-            cur = self.uid_organic_workload_counter[uid].tick()
+            if uid not in self.uid_organic_workload_counter:
+                self.uid_organic_workload_counter[uid] = BucketCounter(uid, hotkey)
+
+            cur = self.uid_organic_workload_counter[uid].tick(hotkey)
             return cur
 
     async def purge(self, uids: list[int]):
@@ -95,10 +108,20 @@ class WorkloadManager:
                     del self.uid_organic_workload_counter[uid]
                 self.last_full_purge_time = now
     
-    async def compute_workload_score(self, uids: list[int], challenge_id: str = "") -> List[float]:
+    async def compute_workload_score(
+        self,
+        uids: list[int],
+        hotkeys: list[str],
+        challenge_id: str = ""
+    ) -> List[float]:
         await self.purge(uids)
 
-        workload_counts = [self.uid_organic_workload_counter[uid].count() for uid in uids]
+        workload_counts = []
+        for uid, hotkey in zip(uids, hotkeys):
+            if uid not in self.uid_organic_workload_counter:
+                self.uid_organic_workload_counter[uid] = BucketCounter(uid, hotkey)
+            workload_counts.append(self.uid_organic_workload_counter[uid].count(hotkey))
+
         min_workload = min(workload_counts) if workload_counts else 0
         max_workload = max(workload_counts) if workload_counts else 1
 
@@ -135,17 +158,27 @@ class WorkloadManager:
         return scores
 
     async def compute_organic_task(self):
+        debug = os.getenv("DEBUG_ORGANIC_COUNTER", "0") == "1"
+
         while True:
             await asyncio.sleep(self.organic_task_compute_interval)
+
+            if debug:
+                info_lines = []
+                for uid, counter in self.uid_organic_workload_counter.items():
+                    info_lines.append(f"UID: {uid}, hotkey: {counter.hotkey}, buckets: {dict(counter.buckets)}")
+                if not info_lines:
+                    logger.info("\n".join(info_lines))
+
             try:
                 for i in range(self.organic_task_concurrency):
                     logger.debug(f"[WorkloadManager] Round {i+1}/{self.organic_task_concurrency} of computing organic workload scores")
                     
                     if self.organic_score_queue:
-                        miner_uid, resp_dict = self.organic_score_queue.pop(0)
+                        miner_uid, hotkey, resp_dict = self.organic_score_queue.pop(0)
                         response = OrganicNonStreamSynapse(**resp_dict)
 
-                        miner_uid_work_load = await self.collect(miner_uid)
+                        miner_uid_work_load = await self.collect(miner_uid, hotkey)
                         if miner_uid_work_load % self.organic_task_sample_rate != 0:
                             logger.debug(f"[WorkloadManager] Skipping organic task computation for miner: {miner_uid} at count {miner_uid_work_load}")
                             continue

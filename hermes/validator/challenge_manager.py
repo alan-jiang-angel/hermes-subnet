@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import os
 from pathlib import Path
 import time
@@ -33,6 +34,7 @@ class ChallengeManager:
     workload_manager: WorkloadManager
     event_stop: Event
     scores: torch.Tensor
+    uids: list[int]
 
 
     def __init__(
@@ -82,8 +84,8 @@ class ChallengeManager:
         self.event_stop = event_stop
 
         self._last_set_weight_time = time.time()
-        self.scores = torch.zeros_like(torch.tensor(self.settings.metagraph.S), dtype=torch.float32)
-        self.device = 'cpu'
+        # self.scores = torch.zeros_like(torch.tensor(self.settings.metagraph.S), dtype=torch.float32)
+        # self.device = 'cpu'
         self.set_weight_interval = int(os.getenv("SET_WEIGHT_INTERVAL", 60 * 30))  # seconds
         logger.info(f"[ChallengeManager] Set weight interval set to {self.set_weight_interval} seconds")
 
@@ -112,8 +114,15 @@ class ChallengeManager:
                 logger.warning("[ChallengeManager] No projects found, skipping this round.")
                 await asyncio.sleep(self.challenge_interval)
                 continue
+            
+            miner_uids, miner_hotkeys = self.settings.miners()
+            uids = []
+            hotkeys = []
+            for idx, u in enumerate(miner_uids):
+                if u != self.uid:
+                    uids.append(u)
+                    hotkeys.append(miner_hotkeys[idx])
 
-            uids = [uid for uid in self.settings.miners() if uid != self.uid]
             if not uids:
                 logger.warning("[ChallengeManager] No available miners for challenge, skipping this round.")
                 await asyncio.sleep(self.challenge_interval)
@@ -164,9 +173,10 @@ class ChallengeManager:
                 )
                 project_score_matrix.append(zip_scores)
 
-            workload_score = await self.workload_manager.compute_workload_score(uids, challenge_id=challenge_id)
+            workload_score = await self.workload_manager.compute_workload_score(uids, hotkeys, challenge_id=challenge_id)
             self.scorer_manager.update_scores(
                 uids, 
+                hotkeys,
                 project_score_matrix, 
                 workload_score, 
                 challenge_id=challenge_id
@@ -240,6 +250,7 @@ class ChallengeManager:
                     scores = list(scores_dict.values())
                     if not uids:
                         continue
+                    scores = [s[0] for s in scores]
                     self._set_weights(uids, scores)
 
                     self._last_set_weight_time = time.time()
@@ -248,22 +259,18 @@ class ChallengeManager:
 
     def _set_weights(self, uids: list[int], scores: list[float]):
         logger.info(f"[ChallengeManager] set_weights for uids: {uids}, scores: {scores}")
+        scores_np = np.array(scores, dtype=np.float32)
 
-        scattered_scores: torch.FloatTensor = self.scores.scatter(
-            0, torch.tensor(uids).to(self.device), torch.tensor(scores, dtype=torch.float32).to(self.device)
-        ).to(self.device)
-        
-        logger.info(f"scattered_scores: {scattered_scores}")
-
-        raw_weights = torch.nn.functional.normalize(scattered_scores, p=1, dim=0)
-        logger.info(f"raw_weights: {raw_weights}")
-
+        if np.all(scores_np == 0):
+            logger.warning("[ChallengeManager] All scores are zero, skipping set weight.")
+            return
         (
             processed_weight_uids,
             processed_weights,
         ) = bt.utils.weight_utils.process_weights_for_netuid(
-                uids = np.array(self.settings.metagraph.uids, dtype=np.int64),
-                weights = raw_weights.detach().cpu().numpy().astype(np.float32),
+                uids = np.array(uids, dtype=np.int64),
+                # weights = raw_weights.detach().cpu().numpy().astype(np.float32),
+                weights = scores_np,
                 netuid=self.settings.netuid,
                 subtensor=self.settings.subtensor,
                 metagraph=self.settings.metagraph,
@@ -279,5 +286,5 @@ class ChallengeManager:
             wait_for_finalization=False,
             version_key=10010,
         )
-        logger.info(f"processed_weights: {suc, msg}")
+        logger.info(f"processed_weights result: {suc, msg}")
 

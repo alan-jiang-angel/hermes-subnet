@@ -1,7 +1,7 @@
 
 import os
 import time
-from typing import List
+from typing import List, Tuple
 from bittensor.core.metagraph import Metagraph
 from bittensor.core.subtensor import Subtensor
 from loguru import logger
@@ -87,17 +87,18 @@ class Settings:
     def subtensor_network(self) -> str | None:
         return os.environ.get("SUBTENSOR_NETWORK", None)
 
-    def miners(self) -> List[int]:
+    def miners(self) -> Tuple[List[int], List[str]]:
         uids = []
-        # logger.info('all uids:', self.metagraph.uids)
-        for uid in self.metagraph.uids:
+        meta = self.metagraph
+        for uid in meta.uids:
             # logger.info('uid:', uid, 'is_serving:', self.metagraph.axons[uid].is_serving, 'permit:', self.metagraph.validator_permit[uid], 'stake:', self.metagraph.S[uid])
-            if not self.metagraph.axons[uid].is_serving:
+            if not meta.axons[uid].is_serving:
               continue
-            if self.metagraph.validator_permit[uid] and self.metagraph.S[uid] > 1024:
+            if meta.validator_permit[uid] and meta.S[uid] > 1024:
                 continue
             uids.append(int(uid))
-        return uids
+        hotkeys = [meta.hotkeys[u] for u in uids]
+        return uids, hotkeys
 
     def inspect(self):
         uids = self.metagraph.uids

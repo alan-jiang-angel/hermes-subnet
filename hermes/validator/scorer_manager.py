@@ -7,7 +7,7 @@ import numpy as np
 from common import utils
 from common.prompt_template import SCORE_PROMPT
 from common.protocol import SyntheticNonStreamSynapse
-from testing.ema import EMAUpdater
+from hermes.validator.ema import EMAUpdater
 
 
 class ScorerManager:
@@ -45,6 +45,7 @@ class ScorerManager:
     
     def update_scores(self, 
         uids: List[int], 
+        hotkeys: List[str],
         project_score_matrix: List[List[float]],
         workload_score: List[float] | None,
         challenge_id: str = ""
@@ -60,7 +61,7 @@ class ScorerManager:
         score_matrix = np.array(merged)
         score_matrix = score_matrix.sum(axis=0)
         
-        new_scores = self.ema.update(uids, score_matrix.tolist())
+        new_scores = self.ema.update(uids, hotkeys, score_matrix.tolist())
         logger.info(f"[ScorerManager] - {challenge_id} uids: {uids}, project_score_matrix: {project_score_matrix}, workload_score: {workload_score}, merged: {merged}, score_matrix: {score_matrix.tolist()}, updated_ema_scores: {new_scores}")
 
     def get_last_scores(self):

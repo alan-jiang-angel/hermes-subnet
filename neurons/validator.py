@@ -16,7 +16,6 @@
 # DEALINGS IN THE SOFTWARE.
 
 import asyncio
-import copy
 import os
 from pathlib import Path
 import torch.multiprocessing as mp
@@ -38,7 +37,6 @@ HermesLogger.configure_loguru(file=f"logs/hermes_validator.log")
 
 class Validator(BaseNeuron):
     dendrite: bt.Dendrite
-    hotkeys: dict[int, str]  # uid to hotkey mapping
 
     @property
     def role(self) -> str:
@@ -46,8 +44,6 @@ class Validator(BaseNeuron):
     
     def __init__(self):
         super().__init__()
-        self.hotkeys = copy.deepcopy(self.settings.metagraph.hotkeys)
-        # self.scores = torch.zeros_like(torch.tensor(self.settings.metagraph.S), dtype=torch.float32)
         self.dendrite = bt.dendrite(wallet=self.settings.wallet)
         
         self.forward_miner_timeout = int(os.getenv("FORWARD_MINER_TIMEOUT", 60 * 3))  # seconds
@@ -95,9 +91,9 @@ class Validator(BaseNeuron):
             logger.error(f"Failed to serve API: {e}")
 
     async def forward_miner(self, cid: str, body: ChatCompletionRequest):
-        uids = [u for u in self.settings.miners() if u != self.uid]
+        miner_uids, _ = self.settings.miners()
+        uids = [u for u in miner_uids if u != self.uid]
         miner_uid = random.choice(uids)
-        logger.info(f"[Validator] Received organic task({body.id}) cid: {cid}, body: {body}, forward to miner_uid: {miner_uid}")
 
         if body.stream:
             async def streamer():
@@ -115,9 +111,17 @@ class Validator(BaseNeuron):
             return StreamingResponse(streamer(), media_type="text/plain")
 
         synapse = OrganicNonStreamSynapse(id=body.id, project_id=cid, completion=body)
+        axons = self.settings.metagraph.axons[miner_uid]
+        if not axons:
+            logger.error(f"[Validator] organic task({body.id}) No axons found for miner_uid: {miner_uid}")
+            synapse.response = {"error": "No axons found"}
+            return synapse
+
+        logger.info(f"[Validator] Received organic task({body.id}) cid: {cid}, body: {body}, forward to miner_uid: {miner_uid}({axons.hotkey})")
+
         start_time = time.perf_counter()
         response = await self.dendrite.forward(
-            axons=self.settings.metagraph.axons[miner_uid],
+            axons=axons,
             synapse=synapse,
             deserialize=True,
             timeout=self.forward_miner_timeout,
@@ -129,7 +133,7 @@ class Validator(BaseNeuron):
 
         # logger.info(f'----{response.dendrite.status_code}')
         # logger.info(f'----{response.dendrite.status_message}')
-        self.organic_score_queue.append((miner_uid, response.dict()))
+        self.organic_score_queue.append((miner_uid, axons.hotkey, response.dict()))
         return response
 
 def run_challenge(organic_score_queue: list, event_stop: Event):

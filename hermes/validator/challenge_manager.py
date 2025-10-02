@@ -91,7 +91,7 @@ class ChallengeManager:
         self.synthetic_score = synthetic_score
         self.event_stop = event_stop
 
-        self._last_set_weight_time = time.time()
+        self._last_set_weight_time = 0
         # self.scores = torch.zeros_like(torch.tensor(self.settings.metagraph.S), dtype=torch.float32)
         # self.device = 'cpu'
         self.set_weight_interval = int(os.getenv("SET_WEIGHT_INTERVAL", 60 * 30))  # seconds
@@ -101,124 +101,147 @@ class ChallengeManager:
         logger.info(f"[ChallengeManager] Using LLM model: {score_model_name} for scoring")
 
     async def start(self):
-        mode = os.getenv("PROJECT_PULL_MODE", "pull")
+        try:
+            mode = os.getenv("PROJECT_PULL_MODE", "pull")
 
-        # pull projects & init agents
-        await self.agent_manager.start(mode == "pull", role="validator")
+            # pull projects & init agents
+            await self.agent_manager.start(mode == "pull", role="validator")
 
-        self.task = [
-            asyncio.create_task(self.workload_manager.compute_organic_task()),
-            asyncio.create_task(self.set_weight()),
-            asyncio.create_task(self.challenge_loop())
-        ]
-        await asyncio.gather(*self.task)
+            self.task = [
+                asyncio.create_task(self.workload_manager.compute_organic_task()),
+                asyncio.create_task(self.set_weight()),
+                asyncio.create_task(self.challenge_loop())
+            ]
+            await asyncio.gather(*self.task)
+        except KeyboardInterrupt:
+            logger.info("[ChallengeManager] Starting process interrupted by user")
+            # Cancel all running tasks
+            if hasattr(self, 'task'):
+                for task in self.task:
+                    if not task.done():
+                        task.cancel()
+                # Wait for tasks to complete cancellation
+                await asyncio.gather(*self.task, return_exceptions=True)
+            logger.info("[ChallengeManager] All tasks cancelled successfully")
+            raise  # Re-raise to allow graceful shutdown at higher level
+        except Exception as e:
+            logger.error(f"[ChallengeManager] Failed to start challenge manager: {e}\n{traceback.format_exc()}")
+            raise
 
     async def challenge_loop(self):
-        while not self.event_stop.is_set():
-            await asyncio.sleep(self.challenge_interval)
-
-            projects = self.agent_manager.get_projects()
-            if not projects:
-                logger.warning("[ChallengeManager] No projects found, skipping this round.")
+        try:
+            while not self.event_stop.is_set():
                 await asyncio.sleep(self.challenge_interval)
-                continue
-            
-            miner_uids, miner_hotkeys = self.settings.miners()
-            uids = []
-            hotkeys = []
-            for idx, u in enumerate(miner_uids):
-                if u != self.uid:
-                    uids.append(u)
-                    hotkeys.append(miner_hotkeys[idx])
 
-            if not uids:
-                logger.warning("[ChallengeManager] No available miners for challenge, skipping this round.")
-                await asyncio.sleep(self.challenge_interval)
-                continue
-
-            project_score_matrix = []
-
-            for cid, project_config in projects.items():
-                challenge_id = str(uuid4())
-                
-                # generate challenge
-                question = await question_generator.generate_question(cid, project_config.schema_content, self.llm_synthetic)
-                if not question:
+                projects = self.agent_manager.get_projects()
+                if not projects:
+                    logger.warning("[ChallengeManager] No projects found, skipping this round.")
+                    await asyncio.sleep(self.challenge_interval)
                     continue
 
-                # generate ground truth
-                success, ground_truth, ground_cost = await self.generate_ground_truth(cid, question)
+                miner_uids, miner_hotkeys = self.settings.miners()
+                uids = []
+                hotkeys = []
+                for idx, u in enumerate(miner_uids):
+                    if u != self.uid:
+                        uids.append(u)
+                        hotkeys.append(miner_hotkeys[idx])
 
-                # Create challenge table
-                table_formatter.create_synthetic_challenge_table(
-                    round_id=self.round_id,
-                    challenge_id=challenge_id,
-                    cid=cid,
-                    question=question,
-                    success=success,
-                    ground_truth=ground_truth,
-                    ground_cost=ground_cost
-                )
-                if not success:
-                    logger.error(f"[ChallengeManager] - {challenge_id} Failed to generate ground truth. {ground_truth}")
+                if not uids:
+                    logger.warning("[ChallengeManager] No available miners for challenge, skipping this round.")
+                    await asyncio.sleep(self.challenge_interval)
                     continue
 
-                # query all miner
-                logger.info(f"[ChallengeManager] - {challenge_id} query miners: {uids}")
-                responses = await asyncio.gather(
-                    *(self.query_miner(
-                        uid=uid,
-                        cid=cid,
+                project_score_matrix = []
+
+                for cid, project_config in projects.items():
+                    challenge_id = str(uuid4())
+
+                    # generate challenge
+                    question = await question_generator.generate_question(cid, project_config.schema_content, self.llm_synthetic)
+                    if not question:
+                        continue
+
+                    # generate ground truth
+                    success, ground_truth, ground_cost = await self.generate_ground_truth(cid, question)
+
+                    # Create challenge table
+                    table_formatter.create_synthetic_challenge_table(
+                        round_id=self.round_id,
                         challenge_id=challenge_id,
-                        question=question
-                    ) for uid in uids)
-                )
+                        cid=cid,
+                        question=question,
+                        success=success,
+                        ground_truth=ground_truth,
+                        ground_cost=ground_cost
+                    )
+                    if not success:
+                        logger.error(f"[ChallengeManager] - {challenge_id} Failed to generate ground truth. {ground_truth}")
+                        continue
 
-                # score result
-                zip_scores, ground_truth_scores, elapse_weights = await self.scorer_manager.compute_challenge_score(
-                    ground_truth, 
-                    ground_cost, 
-                    responses,
+                    # query all miner
+                    logger.info(f"[ChallengeManager] - {challenge_id} query miners: {uids}")
+                    responses = await asyncio.gather(
+                        *(self.query_miner(
+                            uid=uid,
+                            cid=cid,
+                            challenge_id=challenge_id,
+                            question=question
+                        ) for uid in uids)
+                    )
+
+                    # score result
+                    zip_scores, ground_truth_scores, elapse_weights = await self.scorer_manager.compute_challenge_score(
+                        ground_truth,
+                        ground_cost,
+                        responses,
+                        challenge_id=challenge_id
+                    )
+                    project_score_matrix.append(zip_scores)
+
+                    table_formatter.create_synthetic_miners_response_table(
+                        round_id=self.round_id,
+                        challenge_id=challenge_id,
+                        uids=uids,
+                        responses=responses,
+                        ground_truth_scores=ground_truth_scores,
+                        elapse_weights=elapse_weights,
+                        zip_scores=zip_scores,
+                        cid=cid
+                    )
+
+                if not project_score_matrix:
+                    logger.warning("[ChallengeManager] No valid project score matrix, skipping this round.")
+                    continue
+
+                workload_score, workload_counts, log_quality_scores = await self.workload_manager.compute_workload_score(uids, hotkeys, challenge_id=challenge_id)
+                new_ema_scores = self.scorer_manager.update_scores(
+                    uids,
+                    hotkeys,
+                    project_score_matrix,
+                    workload_score,
                     challenge_id=challenge_id
                 )
-                project_score_matrix.append(zip_scores)
+                self.synthetic_score[0] = self.scorer_manager.get_last_synthetic_scores()
 
-                table_formatter.create_synthetic_miners_response_table(
+                table_formatter.create_synthetic_final_ranking_table(
                     round_id=self.round_id,
                     challenge_id=challenge_id,
                     uids=uids,
-                    responses=responses,
-                    ground_truth_scores=ground_truth_scores,
-                    elapse_weights=elapse_weights,
-                    zip_scores=zip_scores,
-                    cid=cid
+                    hotkeys=hotkeys,
+                    workload_counts=workload_counts,
+                    quality_scores=log_quality_scores,
+                    workload_score=workload_score,
+                    new_ema_scores=new_ema_scores
                 )
+                self.round_id += 1
 
-            if not project_score_matrix:
-                logger.warning("[ChallengeManager] No valid project score matrix, skipping this round.")
-                continue
-    
-            workload_score, workload_counts, log_quality_scores = await self.workload_manager.compute_workload_score(uids, hotkeys, challenge_id=challenge_id)
-            new_ema_scores = self.scorer_manager.update_scores(
-                uids, 
-                hotkeys,
-                project_score_matrix, 
-                workload_score, 
-                challenge_id=challenge_id
-            )
-            self.synthetic_score[0] = self.scorer_manager.get_last_synthetic_scores()
-
-            table_formatter.create_synthetic_final_ranking_table(
-                round_id=self.round_id,
-                challenge_id=challenge_id,
-                uids=uids,
-                hotkeys=hotkeys,
-                workload_counts=workload_counts,
-                quality_scores=log_quality_scores,
-                workload_score=workload_score,
-                new_ema_scores=new_ema_scores
-            )
-            self.round_id += 1
+        except KeyboardInterrupt:
+            logger.info("[ChallengeManager] Challenge loop interrupted by user")
+            raise  # Re-raise to allow graceful shutdown
+        except Exception as e:
+            logger.error(f"[ChallengeManager] Challenge loop error: {e}\n{traceback.format_exc()}")
+            raise
 
     async def generate_ground_truth(self, cid: str, question: str) -> Tuple[bool, str | None, int]:
         start_time = time.perf_counter()
@@ -227,35 +250,48 @@ class ChallengeManager:
         try:
             agent = self.agent_manager.get_graphql_agent(cid)
             if not agent:
-                result = f"No server agent found for cid: {cid}"
-            else:
-                response = await agent.query_no_stream(question)
-                result = response.get('messages', [])[-1].content
-                success = True
-            
-                if not result:
-                    error = utils.try_get_invalid_tool_messages(response.get('messages', []))
-                    if error:
-                        logger.error(f"[ChallengeManager] - {cid} Failed to generate ground truth. {error}")
-                        success = False
-                        result = error
+                raise ValueError(f"No server agent found for cid: {cid}")
+
+            response = await agent.query_no_stream(question)
+            result = response.get('messages', [])[-1].content
+
+            if not result:
+                error = utils.try_get_invalid_tool_messages(response.get('messages', []))
+                if error:
+                    raise RuntimeError(f"[ChallengeManager] - {cid} Failed to generate ground truth. {error}")
+
+            success = True
+
+        except KeyboardInterrupt:
+            logger.info(f"[ChallengeManager] generate_ground_truth interrupted by user for cid: {cid}")
+            raise  # Re-raise to allow graceful shutdown
         except Exception as e:
-            result = str(e)
-            logger.error(f"[ChallengeManager] generate_ground_truth error for cid: {cid} {e}\n{traceback.format_exc()}")
+            # Handle specific rate limit errors differently
+            if isinstance(e, (dict, str)) and ('429' in str(e) or 'RATE_LIMIT_EXCEEDED' in str(e)):
+                logger.warning(f"[ChallengeManager] Rate limit exceeded for cid: {cid}. Will retry later. Error: {e}")
+                raise  # Re-raise rate limit errors to allow retry logic
+            else:
+                logger.error(f"[ChallengeManager] generate_ground_truth error for cid: {cid} {e}\n{traceback.format_exc()}")
+                raise
 
         finally:
             return [success, result, utils.fix_float(time.perf_counter() - start_time)]
 
     async def query_miner(
-        self, 
-        uid: int, 
-        cid: str, 
-        challenge_id: str, 
-        question: str, 
+        self,
+        uid: int,
+        cid: str,
+        challenge_id: str,
+        question: str,
     ):
         synapse = SyntheticNonStreamSynapse(id=challenge_id, project_id=cid, question=question)
         start_time = time.perf_counter()
-        
+
+        # Initialize response object with error defaults
+        r = SyntheticNonStreamSynapse(id=challenge_id, project_id=cid, question=question)
+        r.status_code = ErrorCode.FORWARD_SYNTHETIC_FAILED.value
+        r.error = "Unknown error"
+
         try:
             r: SyntheticNonStreamSynapse = await self.dendrite.forward(
                 axons=self.settings.metagraph.axons[uid],
@@ -264,10 +300,15 @@ class ChallengeManager:
                 timeout=self.forward_miner_timeout,
             )
             logger.debug(f"🔍 [ChallengeManager] - {challenge_id} MINER RESPONSE [UID: {uid}] - ✅ is_success: {r.is_success} - {r.dendrite.status_code}")
+        except KeyboardInterrupt:
+            logger.info(f"[ChallengeManager] - {challenge_id} Miner query interrupted by user [UID: {uid}]")
+            raise  # Re-raise to allow graceful shutdown
         except Exception as e:
             logger.error(f"🔍 [ChallengeManager] - {challenge_id} MINER RESPONSE [UID: {uid}] - ❌ Failed to query: {e}\n{traceback.format_exc()}")
-            r.status_code = ErrorCode.FORWARD_SYNTHETIC_FAILED.value
-            r.error = str(e)
+            if not hasattr(r, 'status_code'):
+                r.status_code = ErrorCode.FORWARD_SYNTHETIC_FAILED.value
+            if not hasattr(r, 'error'):
+                r.error = str(e)
         finally:
             r.elapsed_time = utils.fix_float(time.perf_counter() - start_time)
             return r

@@ -51,100 +51,122 @@ class Miner(BaseNeuron):
         super().__init__()
 
     async def start(self):
-        super().start()
+        try:
+            super().start()
 
-        self.metrics = Metrics()
-        
-        self.db_queue = asyncio.Queue()
-        self.sqlite_manager = SQLiteManager(f".data/{self.role}.db")
-        self.axon = bt.axon(
-            wallet=self.settings.wallet, 
-            port=self.settings.port,
-            ip=self.settings.external_ip,
-            external_ip=self.settings.external_ip,
-            external_port=self.settings.port
-        )
-        self.axon.app.add_middleware(
-            StatsMiddleware,
-            sqlite_manager=self.sqlite_manager,
-            metrics=self.metrics
-        )
+            self.metrics = Metrics()
 
-        def allow_all(synapse: CapacitySynapse) -> None:
-            return None
-        
-        self.axon.attach(
-            forward_fn=self.forward_organic_stream,
-        )
-
-        self.axon.attach(
-            forward_fn=self.forward_organic_non_stream
-        )
-
-        self.axon.attach(
-            forward_fn=self.forward_synthetic_non_stream
-        )
-
-        self.axon.attach(
-            forward_fn=self.forward_capacity,
-            verify_fn=allow_all
-        )
-
-        self.axon.serve(netuid=self.settings.netuid, subtensor=self.settings.subtensor)
-
-        self.axon.start()
-        logger.info(f"Miner starting at block: {self.settings.subtensor.block}")
-        logger.info(f"Axon serving on port: {self.settings.port}")
-        logger.info(f"Axon created: {self.axon}")
-        logger.info(f"Miner starting at block: {self.settings.subtensor.block}")
-        logger.info(f"Stats at: http://{self.settings.external_ip}:{self.settings.port}/stats")
-
-        tasks = [
-            asyncio.create_task(
-                self.refresh_agents()
-            ),
-            asyncio.create_task(
-                self.profile_tools_stats()
-            ),
-            asyncio.create_task(
-                self.db_writer()
+            self.db_queue = asyncio.Queue()
+            self.sqlite_manager = SQLiteManager(f".data/{self.role}.db")
+            self.axon = bt.axon(
+                wallet=self.settings.wallet,
+                port=self.settings.port,
+                ip=self.settings.external_ip,
+                external_ip=self.settings.external_ip,
+                external_port=self.settings.port
             )
-        ]
+            self.axon.app.add_middleware(
+                StatsMiddleware,
+                sqlite_manager=self.sqlite_manager,
+                metrics=self.metrics
+            )
 
-        await asyncio.gather(*tasks)
+            def allow_all(synapse: CapacitySynapse) -> None:
+                return None
+
+            self.axon.attach(
+                forward_fn=self.forward_organic_stream,
+            )
+
+            self.axon.attach(
+                forward_fn=self.forward_organic_non_stream
+            )
+
+            self.axon.attach(
+                forward_fn=self.forward_synthetic_non_stream
+            )
+
+            self.axon.attach(
+                forward_fn=self.forward_capacity,
+                verify_fn=allow_all
+            )
+
+            self.axon.serve(netuid=self.settings.netuid, subtensor=self.settings.subtensor)
+
+            self.axon.start()
+            logger.info(f"Miner starting at block: {self.settings.subtensor.block}")
+            logger.info(f"Axon serving on port: {self.settings.port}")
+            logger.info(f"Axon created: {self.axon}")
+            logger.info(f"Miner starting at block: {self.settings.subtensor.block}")
+            logger.info(f"Stats at: http://{self.settings.external_ip}:{self.settings.port}/stats")
+
+            self._running_tasks = [
+                asyncio.create_task(
+                    self.refresh_agents()
+                ),
+                asyncio.create_task(
+                    self.profile_tools_stats()
+                ),
+                asyncio.create_task(
+                    self.db_writer()
+                )
+            ]
+
+            await asyncio.gather(*self._running_tasks)
+        except KeyboardInterrupt:
+            logger.info("[Miner] Miner start process interrupted by user")
+            # Cancel all running tasks
+            if hasattr(self, '_running_tasks'):
+                for task in self._running_tasks:
+                    if not task.done():
+                        task.cancel()
+                # Wait for tasks to complete cancellation
+                await asyncio.gather(*self._running_tasks, return_exceptions=True)
+            logger.info("[Miner] All tasks cancelled successfully")
+            raise  # Re-raise to allow graceful shutdown at higher level
+        except Exception as e:
+            logger.error(f"[Miner] Failed to start miner: {e}")
+            raise
 
     async def db_writer(self):
-        last_check_time = 0
+        try:
+            last_check_time = 0
 
-        while True:
-            if int(time.time()) - last_check_time > 60 * 10:
-                self.sqlite_manager.cleanup_old_records()
-                last_check_time = int(time.time())
+            while True:
+                if int(time.time()) - last_check_time > 60 * 10:
+                    self.sqlite_manager.cleanup_old_records()
+                    last_check_time = int(time.time())
 
-            item = await self.db_queue.get()
+                item = await self.db_queue.get()
 
-            type = item.get("type")
-            status_code = item.get("status_code")
-            project_id = item.get("project_id")
+                type = item.get("type")
+                status_code = item.get("status_code")
+                project_id = item.get("project_id")
 
-            target = self.metrics.synthetic_project_usage if type == 0 else self.metrics.organic_project_usage
-            target.incr(
-                project_id, 
-                success=False if status_code != 200 else True
-            )
+                target = self.metrics.synthetic_project_usage if type == 0 else self.metrics.organic_project_usage
+                target.incr(
+                    project_id,
+                    success=False if status_code != 200 else True
+                )
 
-            tool_hit = item.get("tool_hit")
+                tool_hit = item.get("tool_hit")
 
-            logger.info(f"[DB Writer] - Inserting request log for project {project_id} with status code {status_code}, type:{type}, tool_hit: {tool_hit}")
+                logger.info(f"[DB Writer] - Inserting request log for project {project_id} with status code {status_code}, type:{type}, tool_hit: {tool_hit}")
 
-            if tool_hit and tool_hit != '[]':
-                tool_hit_list = json.loads(tool_hit)
-                target = self.metrics.synthetic_tool_usage if type == 0 else self.metrics.organic_tool_usage
-                for tool_name, count in tool_hit_list:
-                    target.incr(tool_name, count)
+                if tool_hit and tool_hit != '[]':
+                    tool_hit_list = json.loads(tool_hit)
+                    target = self.metrics.synthetic_tool_usage if type == 0 else self.metrics.organic_tool_usage
+                    for tool_name, count in tool_hit_list:
+                        target.incr(tool_name, count)
 
-            self.sqlite_manager.insert_request(**item)
-            self.db_queue.task_done()
+                self.sqlite_manager.insert_request(**item)
+                self.db_queue.task_done()
+        except KeyboardInterrupt:
+            logger.info("[Miner] DB writer interrupted by user")
+            raise  # Re-raise to allow graceful shutdown
+        except Exception as e:
+            logger.error(f"[Miner] DB writer error: {e}")
+            raise
 
     async def _handle_task(
             self,
@@ -328,16 +350,32 @@ class Miner(BaseNeuron):
         #     self.agents = AgentZoo.load_agents(project_dir)
 
     async def profile_tools_stats(self):
-        while True:
-            await asyncio.sleep(60 * 1)
-            logger.info(f"[MINER] usage stats: {json.dumps(self.metrics.stats())}")
+        try:
+            while True:
+                await asyncio.sleep(60 * 1)
+                logger.info(f"[MINER] usage stats: {json.dumps(self.metrics.stats())}")
+        except KeyboardInterrupt:
+            logger.info("[Miner] Profile tools stats interrupted by user")
+            raise  # Re-raise to allow graceful shutdown
+        except Exception as e:
+            logger.error(f"[Miner] Profile tools stats error: {e}")
+            raise
 
 
 if __name__ == "__main__":
-    miner = Miner()
-    asyncio.run(miner.start())
+    try:
+        miner = Miner()
+        asyncio.run(miner.start())
 
-    while True:
-        asyncio.sleep(60 * 2)
+        # Keep the miner running
+        while True:
+            time.sleep(60 * 2)
+    except KeyboardInterrupt:
+        logger.info("[Miner] Received interrupt signal, shutting down gracefully...")
+        # Additional cleanup can be added here if needed
+        logger.info("[Miner] Shutdown complete")
+    except Exception as e:
+        logger.error(f"[Miner] Unexpected error: {e}")
+        raise
 
 

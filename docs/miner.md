@@ -4,6 +4,7 @@
     - [Python environment with required dependencies](#python-environment-with-required-dependencies)
     - [Bittensor wallet](#bittensor-wallet)
   - [Running a Miner](#running-a-miner)
+  - [Monitoring Dashboard](#monitoring-dashboard)
 - [Optimise Miner Rewards](#optimise-miner-rewards)
   - [Scoring Mechanism Explained](#scoring-mechanism-explained)
   - [Primitive Approaches](#primitive-approaches)
@@ -160,7 +161,50 @@ This will pull projects and start serving. You should see output similar to the 
 ```bash
 2025-09-04 13:42:03.416 | INFO     | agent.agent_zoo:load_agents:100 - [AGENT] Creating agent for project QmfUNJC1Qz8m3F67sQmxrwjuSAu4WaCR1iBdPPdzBruQ7P using model gpt-4o-mini
 2025-09-04 13:42:06.102 | INFO     | __main__:profile_tools_stats:293 - [MINER] Project QmfUNJC1Qz8m3F67sQmxrwjuSAu4WaCR1iBdPPdzBruQ7P - Tool usage stats: {}
+2025-09-04 13:42:06.105 | INFO     | neurons.miner:start:101 - Stats at: http://1.37.27.39:8086/stats
 ```
+
+## Monitoring Dashboard
+
+Once your miner is running, you can access a built-in monitoring dashboard to track its performance:
+
+**Access URL**: `http://<EXTERNAL_IP>:<PORT>/stats`
+
+For example, if your external IP is `1.37.27.39` and port is `8086`, visit:
+```
+http://1.37.27.39:8086/stats
+```
+
+### Dashboard Features
+
+The monitoring dashboard provides real-time insights into:
+
+- **Request Statistics**: Total number of requests processed
+- **Response Times**: Average and current response times
+- **Success Rates**: Percentage of successful vs failed requests
+- **Project Usage**: Usage statistics per project
+- **Tool Usage**: Which tools are being called and how frequently
+- **Error Rates**: Types and frequency of errors
+- **Performance Metrics**: CPU usage, memory consumption, and other system metrics
+
+### Monitoring Best Practices
+
+1. **Regular Checks**: Monitor the dashboard regularly to ensure your miner is performing optimally
+2. **Tool Optimization**: Use tool usage statistics to identify which custom tools are most effective
+3. **Performance Tuning**: Monitor response times and optimize slow-performing tools
+4. **Error Tracking**: Keep an eye on error rates to identify and fix issues quickly
+5. **Resource Management**: Monitor system resources to prevent overloading
+
+### Troubleshooting
+
+If you cannot access the dashboard:
+
+1. **Check Firewall**: Ensure port 8086 (or your configured port) is open in your firewall
+2. **Verify IP**: Confirm your `EXTERNAL_IP` in the configuration file is correct
+3. **Check Port**: Make sure the port is not already in use by another service
+4. **Network Access**: Test connectivity from your browser to the miner's IP and port
+
+The dashboard updates in real-time and provides essential information for optimizing your miner's performance and maximizing rewards.
 
 # Optimise Miner Rewards
 

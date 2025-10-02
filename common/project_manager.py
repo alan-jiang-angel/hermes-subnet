@@ -201,6 +201,15 @@ class ProjectManager:
 
     async def register_project(self, cid: str, endpoint: str) -> ProjectConfig:
         try:
+            # Check if project already exists locally
+            existing_config = self._load_existing_project(cid)
+            if existing_config:
+                logger.info(f"[ProjectManager] Loading existing project: {existing_config.domain_name} ({cid})")
+                self.projects_config[cid] = existing_config
+                return existing_config
+
+            # Project doesn't exist locally, need to analyze with LLM
+            logger.info(f"[ProjectManager] Analyzing new project: {cid}")
             manifest = await self.pull_manifest(cid)
             schema_content = await self.pull_schema(cid, manifest)
 
@@ -220,7 +229,7 @@ class ProjectManager:
             self._save_project(config)
 
             self.projects_config[cid] = config
-            logger.info(f"[ProjectManager] Registered project: {llm_analysis['domain_name']} ({cid})")
+            logger.info(f"[ProjectManager] Registered new project: {llm_analysis['domain_name']} ({cid})")
             return config
         except Exception as e:
             raise RuntimeError(f"[ProjectManager] Failed to register project {cid}: {str(e)}")
@@ -390,6 +399,31 @@ Make each capability very specific to the entities found in the schema."""
             }
 
     
+    def _load_existing_project(self, cid: str) -> ProjectConfig | None:
+        """Load existing project configuration from local disk if it exists."""
+        if self.target_dir is None:
+            return None
+
+        config_file = self.target_dir / cid / "config.json"
+        if not config_file.exists():
+            return None
+
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+
+            # Validate that the loaded config has all required fields
+            required_fields = ['cid', 'endpoint', 'schema_content', 'domain_name', 'domain_capabilities']
+            for field in required_fields:
+                if field not in config_data:
+                    logger.warning(f"[ProjectManager] Existing project {cid} missing required field: {field}")
+                    return None
+
+            return ProjectConfig(**config_data)
+        except Exception as e:
+            logger.error(f"[ProjectManager] Failed to load existing project {cid}: {e}")
+            return None
+
     def _save_project(self, config: ProjectConfig):
         # current_dir = Path(__file__).parent
         # PROJECTS_DIR = current_dir.parent / "projects"

@@ -218,7 +218,8 @@ class Miner(BaseNeuron):
                     status_code = ErrorCode.TOOL_ERROR if error is not None else status_code
 
                 if status_code == ErrorCode.SUCCESS:
-                    response = r if type == 1 else answer
+                    # For both organic and synthetic, only return the final answer
+                    response = answer
 
         except Exception as e:
             # log.error(f"[Synthetic] - {task.id} Agent error: {e}")

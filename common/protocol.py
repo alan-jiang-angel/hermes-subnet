@@ -98,7 +98,7 @@ class OrganicStreamSynapse(bt.StreamingSynapse):
     
 class OrganicNonStreamSynapse(BaseSynapse):
     completion: ChatCompletionRequest | None = None
-    response: Optional[dict] = None
+    response: str | None = ''
 
     def get_question(self):
         if not self.completion:

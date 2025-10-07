@@ -219,7 +219,8 @@ class TableFormatter:
         rstr = None
         if response.is_success:
             if response.status_code == ErrorCode.SUCCESS.value:
-                rstr = f"💬 Answer: {response.response.get('messages')[-1].content}"
+                # response.response is now a simple string (final answer)
+                rstr = f"💬 Answer: {response.response}"
             else:
                 rstr = f"⚠️ {response.status_code}: {response.error}"
         else:

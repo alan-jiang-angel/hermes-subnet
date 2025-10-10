@@ -113,7 +113,7 @@ class TableFormatter:
         rows = [
             f"❓ Question: {question}\n",
             f"🎯 Ground Truth: {None if not success else ground_truth}\n",
-            f"⚠️ {ground_truth}\n" if not success else "",
+            # f"⚠️ {ground_truth}\n" if not success else "",
             f"⏱️ Cost: {ground_cost}s"
         ]
         challenge_output = self.create_single_column_table(
@@ -215,7 +215,7 @@ class TableFormatter:
         question: str,
         response: OrganicNonStreamSynapse
     ):
-        header = "🌿 Organic" + f" {id})"
+        header = "🌿 Organic" + f" ({id})"
         rstr = None
         if response.is_success:
             if response.status_code == ErrorCode.SUCCESS.value:

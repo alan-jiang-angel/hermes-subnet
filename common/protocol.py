@@ -76,25 +76,24 @@ class OrganicStreamSynapse(bt.StreamingSynapse):
     response: Optional[dict] = None
 
     async def process_streaming_response(self, response: "ClientResponse"):
-        logger.info(f"Processing streaming response2: {response}")
-
+        # logger.info(f"Processing streaming response: {response}")
         buffer = ""
         async for chunk in response.content.iter_any():
             text = chunk.decode("utf-8", errors="ignore")
             buffer += text
-            logger.info(f"Streaming response part: {text}")
+            # logger.info(f"Streaming response part: {text}")
             yield text
 
         self._buffer = buffer
 
     def extract_response_json(self, r: "ClientResponse") -> dict:
-        logger.info(f"Extracting JSON from response: {r}")
+        # logger.info(f"Extracting JSON from response: {r}")
         self.response = {"final_text": getattr(self, "_buffer", "")}
         return self.response
 
 
     def deserialize(self):
-        return '[end]'
+        return ''
     
 class OrganicNonStreamSynapse(BaseSynapse):
     completion: ChatCompletionRequest | None = None

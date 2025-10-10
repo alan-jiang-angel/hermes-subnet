@@ -152,10 +152,20 @@ class AgentManager:
                 )
                 logger.info(f"[AgentManager] load agent, Project {cid} using model {self.llm_synthetic.model_name} - tools: {[t.name for t in tools]}, Created: {[t.name for t in created]}, Updated: {[t.name for t in updated]}, Deleted: {deleted}, with prompt: {suc}")
 
+                async def fallback_graphql_agent(state: MessagesState):
+                    # logger.info(f"Passing to fallback_graphql_agent")
+                    messages = state["messages"][0:1]
+                    user_input = messages[-1].content if len(messages) > 0 else ""
+                    # logger.info(f"Passing to graphql_agent with messages: {messages}  000  {user_input}")
+                    response = await graphql_agent.executor.ainvoke({"messages": [{"role": "user", "content": user_input}]})
+                    # logger.info(f"============================================= sss {response}")
+                    # logger.info(f"++++++++++++++++++++++++++++++++++++++++++++: {response['messages'][-1:]}")
+                    return {"messages": response['messages'][-1:]}
 
                 builder = StateGraph(MessagesState)
                 builder.add_node("miner_agent", miner_agent)
-                builder.add_node("graphql_agent", graphql_agent.executor)
+                # builder.add_node("graphql_agent", graphql_agent.executor)
+                builder.add_node("graphql_agent", fallback_graphql_agent)
                 builder.add_conditional_edges(
                     "miner_agent",
                     miner_router

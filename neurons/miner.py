@@ -267,20 +267,59 @@ class Miner(BaseNeuron):
 
     async def forward_organic_stream(self, synapse: OrganicStreamSynapse) -> StreamingSynapse.BTStreamingResponse:
         from starlette.types import Send
-        logger.info(f"\n🤖 [Miner] Received organic stream: {synapse.completion}")
+        log = logger.bind(source=synapse.dendrite.hotkey)
+        log.info(f"\n🤖 [Miner] Received organic stream: {synapse.completion}")
 
         user_messages = [msg for msg in synapse.completion.messages if msg.role == "user"]
         user_input = user_messages[-1].content
 
+        agent_graph, _, graphql_agent = self.agent_manager.get_miner_agent(synapse.project_id)
+
+
         async def token_streamer(send: Send):
-            iter = subAgent.stream_chat_completion(self.serverAgent, user_input, synapse.completion)
-            async for part in iter:
-                logger.info(f"\n🤖 [Miner] Agent: {part}")
+            # logger.info(f"\n🤖 [Miner] Starting agent stream for input: {user_input}, {agent_graph}")
+            buffered_stream = []
+            active_checkpoint_ns = None
+            async for event in agent_graph.astream_events({"messages": [{"role": "user", "content": user_input}]}, version="v2"):
+
+                if event["event"] == "on_chat_model_stream":
+                    checkpoint_ns = event["metadata"].get("checkpoint_ns", "")
+                    message = event["data"].get("chunk", {})
+                    content = message.content
+                    graph_node_name = checkpoint_ns.split(":")[0] if checkpoint_ns else "unknown"
+                    # logger.info(f"{event['metadata']} ---- {event['metadata'].get('langgraph_node','')} - {event['data']} -----graph_node_name: {graph_node_name} ==== {content} type: {type(content)}")
+
+                    if active_checkpoint_ns is None:
+                        active_checkpoint_ns = graph_node_name
+
+                    if graph_node_name == active_checkpoint_ns:
+                        if graph_node_name == "graphql_agent":
+                            await send({
+                                "type": "http.response.body",
+                                "body": content.encode('utf-8'),
+                                "more_body": True
+                            })
+                        else:
+                            buffered_stream.append(content)
+                    else:
+                        buffered_stream.clear()
+                        active_checkpoint_ns = graph_node_name
+                        await send({
+                            "type": "http.response.body",
+                            "body": content.encode('utf-8'),
+                            "more_body": True
+                        })
+
+
+            for content in buffered_stream:
+                # logger.info(f"\n🤖 [Miner] Agent chunk type: {type(content)}, content: {content}")
                 await send({
                     "type": "http.response.body",
-                    "body": part,
+                    "body": content.encode('utf-8'),
                     "more_body": True
                 })
+                await asyncio.sleep(0.25)
+
             await send({
                 "type": "http.response.body",
                 "body": b"",

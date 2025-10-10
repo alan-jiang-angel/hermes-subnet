@@ -183,20 +183,26 @@ class Validator(BaseNeuron):
                 synapse.error = "No selected miner"
                 return synapse
 
+
+            dd: bt.Dendrite = self.dendrite
             if body.stream:
                 async def streamer():
                     synapse = OrganicStreamSynapse(project_id=cid, completion=body)
-                    responses = await self.dendrite.forward(
+                    responses = await dd.forward(
                         axons=self.settings.metagraph.axons[miner_uid],
                         synapse=synapse,
                         deserialize=True,
                         timeout=self.forward_miner_timeout,
                         streaming=True,
                     )
+
                     async for part in responses:
                         # logger.info(f"V3 got part: {part}, type: {type(part)}")
-                        yield part
-                return StreamingResponse(streamer(), media_type="text/plain")
+                        yield f"{part}\n"
+                return StreamingResponse(
+                    streamer(), 
+                    media_type="text/plain"
+                )
 
             axons = self.settings.metagraph.axons[miner_uid]
             if not axons:

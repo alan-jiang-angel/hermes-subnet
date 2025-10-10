@@ -7,12 +7,14 @@ import sys
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
+from langchain.schema import AIMessage
 from loguru import logger
 from langgraph.graph import StateGraph, MessagesState, START, END
 from agent.stats import ToolCountHandler
 from agent.subquery_graphql_agent.base import GraphQLAgent
 from common.project_manager import ProjectConfig, ProjectManager
 from common.utils import create_system_prompt
+import common.utils as utils
 
 
 class AgentManager:
@@ -66,12 +68,21 @@ class AgentManager:
             for m in messages:
                 # TODO: check tool call has real output
                 if m.type == 'ai' and len(m.tool_calls) > 0:
-                    return END
+                    return "final_filter"
             # TODO: trim
             # first_message = messages[0:1]
             # state['messages'] = first_message
             return "graphql_agent"
         
+        def last_message_filter(state: MessagesState):
+            last = state['messages'][-1]
+            if not last.content:
+                error_msg = utils.try_get_invalid_tool_messages(last)
+                if error_msg:
+                    last.content = error_msg
+            # logger.info(f"====================== Entering last_message_filter ====================== {state['messages']}  last:{last}\n")
+            return {"messages": [last]}
+
         base_path = Path(self.save_project_dir)
         for project_dir in base_path.iterdir():
             if not project_dir.is_dir():
@@ -153,23 +164,40 @@ class AgentManager:
                 logger.info(f"[AgentManager] load agent, Project {cid} using model {self.llm_synthetic.model_name} - tools: {[t.name for t in tools]}, Created: {[t.name for t in created]}, Updated: {[t.name for t in updated]}, Deleted: {deleted}, with prompt: {suc}")
 
                 async def fallback_graphql_agent(state: MessagesState):
+                    # logger.info(f"====================== Entering fallback_graphql_agent ====================== {state["messages"]}")
                     # logger.info(f"Passing to fallback_graphql_agent")
                     messages = state["messages"][0:1]
                     user_input = messages[-1].content if len(messages) > 0 else ""
                     # logger.info(f"Passing to graphql_agent with messages: {messages}  000  {user_input}")
                     response = await graphql_agent.executor.ainvoke({"messages": [{"role": "user", "content": user_input}]})
                     # logger.info(f"============================================= sss {response}")
-                    # logger.info(f"++++++++++++++++++++++++++++++++++++++++++++: {response['messages'][-1:]}")
-                    return {"messages": response['messages'][-1:]}
+                    # messages = response['messages']
+                    # for msg in messages:
+                    #     logger.info(f"    ddddddddddddddddddddd: {msg.type} {msg}\n")
+
+                    last = response['messages'][-1]
+                    if not last.content:
+                        error_msg = utils.try_get_invalid_tool_messages(last)
+                        if error_msg:
+                            last.content = error_msg
+
+                    # logger.info(f"++++++++++++++++++++++++++++++++++++++++++++: {last}")
+                    return {"messages": [last]}
 
                 builder = StateGraph(MessagesState)
                 builder.add_node("miner_agent", miner_agent)
                 # builder.add_node("graphql_agent", graphql_agent.executor)
                 builder.add_node("graphql_agent", fallback_graphql_agent)
+                builder.add_node("final_filter", last_message_filter)
+
                 builder.add_conditional_edges(
                     "miner_agent",
                     miner_router
                 )
+
+                builder.add_edge("graphql_agent", "final_filter")
+                builder.add_edge("final_filter", END)
+
                 builder.add_edge(START, "miner_agent")
                 multi_agent_graph = builder.compile()
 

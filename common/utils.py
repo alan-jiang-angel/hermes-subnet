@@ -150,7 +150,10 @@ def select_uid(synthetic_score: dict, available_miners: list, uid_select_count: 
 
     return None, None
 
-def try_get_invalid_tool_messages(messages: list[BaseMessage]) -> str | None:
+def try_get_invalid_tool_messages(messages: list[BaseMessage] | BaseMessage) -> str | None:
+    if not isinstance(messages, list):
+        messages = [messages]
+
     for m in reversed(messages):
         if isinstance(m, AIMessage):
             if len(m.invalid_tool_calls) > 0:

@@ -121,6 +121,15 @@
             color: #dc3545 !important;
             font-weight: bold;
         }
+        /* Project ID column style to handle long IDs */
+        .project-id-cell {
+            max-width: 200px;
+            word-break: break-all;
+            word-wrap: break-word;
+            white-space: normal;
+            overflow-wrap: break-word;
+            hyphens: auto;
+        }
     </style>
 </head>
 <body>
@@ -533,7 +542,7 @@ function updateProjectUsageTable(data, tableId, totalId) {
         }
         
         tr.innerHTML = `
-            <td>${projectId}</td>
+            <td class="project-id-cell">${projectId}</td>
             <td><span class="text-success">${successCount}</span></td>
             <td><span class="text-danger">${failCount}</span></td>
             <td>${totalCount}</td>

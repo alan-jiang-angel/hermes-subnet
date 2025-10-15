@@ -116,8 +116,7 @@ class ProjectManager:
 
         for project in parsed.data.data:
             cid = project.metadata.cid
-            endpoint = f"{project.metadata.endpoint.rstrip('/')}/"
-            combined = f"{cid}{endpoint}"
+            combined = f"{cid}{project.metadata.endpoint}"
             hash_value = utils.hash256(combined)[:8]
             key = f"{cid}_{hash_value}"
             self.projects.update({key: project})

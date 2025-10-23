@@ -9,6 +9,7 @@ import requests
 import hashlib
 from langchain.schema import BaseMessage
 from langchain.schema import AIMessage
+from datetime import datetime, timedelta
 
 
 def try_get_external_ip() -> str | None:
@@ -283,6 +284,42 @@ def is_list(obj) -> bool:
 
 def hash256(data: str) -> str:
     return hashlib.sha256(data.encode()).hexdigest()
+
+def parse_time_range(time_range: str) -> int:
+    """
+    Parse time range string and return cutoff timestamp.
+    
+    Args:
+        time_range: Time range string like "1h", "24h", "30min", "2d"
+        
+    Returns:
+        int: Cutoff timestamp (seconds since epoch)
+        
+    Examples:
+        parse_time_range("1h") -> timestamp 1 hour ago
+        parse_time_range("30min") -> timestamp 30 minutes ago
+        parse_time_range("2d") -> timestamp 2 days ago
+    """
+    current_time = datetime.now()
+    cutoff_time = None
+        
+    if 'min' in time_range:
+        # Extract number before 'min'
+        value = int(time_range.replace('min', ''))
+        cutoff_time = current_time - timedelta(minutes=value)
+    elif 'h' in time_range:
+        # Extract number before 'h'  
+        value = int(time_range.replace('h', ''))
+        cutoff_time = current_time - timedelta(hours=value)
+    elif 'd' in time_range:
+        # Extract number before 'd'
+        value = int(time_range.replace('d', ''))
+        cutoff_time = current_time - timedelta(days=value)
+    else:
+        # Default to 1 hour if format not recognized
+        cutoff_time = current_time - timedelta(hours=1)
+        
+    return int(cutoff_time.timestamp())
             
 def kill_process_group():
     try:

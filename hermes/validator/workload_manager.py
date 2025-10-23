@@ -9,6 +9,7 @@ import traceback
 from loguru import logger
 from typing import TYPE_CHECKING
 import torch
+from agent.stats import TokenUsageMetrics
 import common.utils as utils
 from common.protocol import OrganicNonStreamSynapse
 if TYPE_CHECKING:
@@ -80,16 +81,19 @@ class WorkloadManager:
     organic_workload_counter_full_purge_interval: int
     last_full_purge_time: int = int(time.time())
     work_state_path: str | Path = None
+    token_usage_metrics: TokenUsageMetrics | None = None
     collect_count: int
 
     def __init__(
         self, 
         challenge_manager: "ChallengeManager", 
         organic_score_queue: list,
-        work_state_path: str | Path = None
+        work_state_path: str | Path = None,
+        token_usage_metrics: TokenUsageMetrics = None
     ):
         self.challenge_manager = challenge_manager
         self.organic_score_queue = organic_score_queue
+        self.token_usage_metrics = token_usage_metrics
 
         self.uid_sample_scores = {}
         # self.uid_organic_workload_counter = defaultdict(BucketCounter)
@@ -213,7 +217,7 @@ class WorkloadManager:
                         q = response.completion.messages[-1].content
                         logger.info(f"[WorkloadManager] compute organic task({response.id}) for miner: {miner_uid}, response: {response}. question: {q}")
 
-                        success, ground_truth, ground_cost = await self.challenge_manager.generate_ground_truth(response.project_id, q)
+                        success, ground_truth, ground_cost = await self.challenge_manager.generate_ground_truth(response.cid_hash, q)
 
                         # Validate ground truth content
                         is_valid = success and utils.is_ground_truth_valid(ground_truth)

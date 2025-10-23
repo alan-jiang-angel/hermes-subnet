@@ -13,6 +13,7 @@ import numpy as np
 import torch
 if TYPE_CHECKING:
     from neurons.validator import Validator
+from agent.stats import Phase, TokenUsageMetrics
 from common.agent_manager import AgentManager
 from common.errors import ErrorCode
 from common.protocol import SyntheticNonStreamSynapse
@@ -39,6 +40,7 @@ class ChallengeManager:
     miners_dict: dict
     event_stop: Event
     scores: torch.Tensor
+    token_usage_metrics: TokenUsageMetrics
 
     def __init__(
         self, 
@@ -52,6 +54,7 @@ class ChallengeManager:
         synthetic_model_name: str | None = None,
         score_model_name: str | None = None,
         event_stop: Event = None,
+        synthetic_token_usage: list = None,
         v: "Validator" = None,
     ):
         self.settings = settings
@@ -66,6 +69,7 @@ class ChallengeManager:
         self.uid = uid
         self.round_id = 1
         self.dendrite = dendrite
+        self.token_usage_metrics = TokenUsageMetrics(datas=synthetic_token_usage)
 
         synthetic_model_name = synthetic_model_name or os.getenv("LLM_MODEL", "gpt-5")
         self.llm_synthetic = ChatOpenAI(
@@ -92,7 +96,8 @@ class ChallengeManager:
         self.workload_manager = WorkloadManager(
             challenge_manager=self,
             organic_score_queue=organic_score_queue,
-            work_state_path=Path(self.settings.base_dir) / ".data" / f"{v.role}_workload_state.pt"
+            work_state_path=Path(self.settings.base_dir) / ".data" / f"{v.role}_workload_state.pt",
+            token_usage_metrics=self.token_usage_metrics
         )
 
         self.synthetic_score = synthetic_score
@@ -104,7 +109,7 @@ class ChallengeManager:
         # self.device = 'cpu'
         self.set_weight_interval = int(os.getenv("SET_WEIGHT_INTERVAL", 60 * 30))  # seconds
         
-        logger.info(f"[ChallengeManager] Set weight interval set to {self.set_weight_interval} seconds")
+        logger.info(f"[ChallengeManager] Set weight interval to {self.set_weight_interval} seconds")
 
         logger.info(f"[ChallengeManager] Using LLM model: {synthetic_model_name} for synthetic challenge")
         logger.info(f"[ChallengeManager] Using LLM model: {score_model_name} for scoring")
@@ -179,16 +184,26 @@ class ChallengeManager:
                         challenge_id = str(uuid4())
 
                         # generate challenge
-                        question = await question_generator.generate_question(cid_hash, project_config.schema_content, self.llm_synthetic)
+                        question = await question_generator.generate_question(
+                            cid_hash, 
+                            project_config.schema_content, 
+                            self.llm_synthetic,
+                            self.token_usage_metrics,
+                            round_id=self.round_id
+                        )
                         if not question:
                             logger.warning(f"[ChallengeManager] - {cid_hash} Failed to generate question (attempt {attempt + 1}/{max_retries})")
                             continue
 
-                        # generate ground truth
-                        success, ground_truth, ground_cost = await self.generate_ground_truth(cid_hash, question)
 
-                        # Validate ground truth content
+                        success, ground_truth, ground_cost = await self.generate_ground_truth(cid_hash, question, self.token_usage_metrics,  round_id=self.round_id)
+
                         is_valid = success and utils.is_ground_truth_valid(ground_truth)
+
+                        # question = 'What is the current circulating supply of the network’s native token?'
+                        # is_valid = True
+                        # ground_truth = 'tool: "graphql_schema_info"'
+                        # ground_cost = 4.5
 
                         # Create challenge table
                         table_formatter.create_synthetic_challenge_table(
@@ -230,7 +245,10 @@ class ChallengeManager:
                         ground_truth,
                         ground_cost,
                         responses,
-                        challenge_id=challenge_id
+                        challenge_id=challenge_id,
+                        cid_hash=cid_hash,
+                        token_usage_metrics=self.token_usage_metrics,
+                        round_id=self.round_id
                     )
                     project_score_matrix.append(zip_scores)
 
@@ -278,7 +296,13 @@ class ChallengeManager:
             logger.error(f"[ChallengeManager] Challenge loop error: {e}\n{traceback.format_exc()}")
             raise
 
-    async def generate_ground_truth(self, cid_hash: str, question: str) -> Tuple[bool, str | None, int]:
+    async def generate_ground_truth(
+            self,
+            cid_hash: str,
+            question: str,
+            token_usage_metrics: TokenUsageMetrics | None = None,
+            round_id: int = 0
+        ) -> Tuple[bool, str | None, int]:
         start_time = time.perf_counter()
         success = False
         result = None
@@ -289,6 +313,9 @@ class ChallengeManager:
 
             response = await agent.query_no_stream(question, is_synthetic=True)
             result = response.get('messages', [])[-1].content
+
+            if token_usage_metrics is not None:
+                token_usage_metrics.append(cid_hash, phase=Phase.GENERATE_GROUND_TRUTH, response=response, extra = {"round_id": round_id})
 
             if not result:
                 error = utils.try_get_invalid_tool_messages(response.get('messages', []))

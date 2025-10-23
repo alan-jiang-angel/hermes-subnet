@@ -97,15 +97,18 @@ class Phase(Enum):
 
 class TokenUsageMetrics:
     datas: list[any] = []
+    count: int
 
-    def __init__(self):
-        self.datas = []
+    def __init__(self, datas: list = None):
+        self.datas = datas if datas is not None else []
+        self.count = 0
 
     def append(
             self,
             cid_hash: str,
             phase: Phase,
-            response: BaseMessage | dict[str, any]
+            response: BaseMessage | dict[str, any],
+            extra: dict = {}
         ) -> dict[str, int]:
         extra_input_tokens = 0
         extra_output_tokens = 0
@@ -118,7 +121,7 @@ class TokenUsageMetrics:
             messages = [response]
 
         input_tokens, output_tokens = utils.extract_token_usage(messages)
-        logger.info(f"[TokenUsageMetrics] - append called with cid_hash: {cid_hash}, phase: {phase}, response: {response} input_tokens: {input_tokens}, output_tokens: {output_tokens}, extra_input_tokens: {extra_input_tokens}, extra_output_tokens: {extra_output_tokens}")
+        logger.info(f"[TokenUsageMetrics] - append cid_hash: {cid_hash}, phase: {phase}, input_tokens: {input_tokens}, output_tokens: {output_tokens}, extra_input_tokens: {extra_input_tokens}, extra_output_tokens: {extra_output_tokens}")
 
         data = {
             "cid_hash": cid_hash,
@@ -127,7 +130,34 @@ class TokenUsageMetrics:
             "output_tokens": output_tokens + extra_output_tokens,
             "timestamp":  int(datetime.now().timestamp())
         }
-        self.datas.append(data) 
+        data.update(extra)
+        
+        self.datas.append(data)
+        self.count += 1
+
+        # trim old records if count exceeds threshold
+        if self.count > 10:
+            self.count = 0
+            current_time = int(datetime.now().timestamp())
+            twenty_four_hours_ago = current_time - (24 * 60 * 60)  # 24 hours in seconds
+            
+            original_count = len(self.datas)
+            
+            # For shared lists (manager.list), we need to modify in-place
+            if hasattr(self.datas, '_callmethod'):  # Check if it's a manager.list
+                # Remove items in reverse order to avoid index shifting
+                for i in range(len(self.datas) - 1, -1, -1):
+                    if self.datas[i]["timestamp"] <= twenty_four_hours_ago:
+                        del self.datas[i]
+            else:
+                # For regular lists
+                self.datas = [d for d in self.datas if d["timestamp"] > twenty_four_hours_ago]
+            
+            trimmed_count = original_count - len(self.datas)
+            
+            if trimmed_count > 0:
+                logger.info(f"[TokenUsageMetrics] Trimmed {trimmed_count} records older than 24 hours (original: {original_count}, remaining: {len(self.datas)})")
+
         return data
 
     def stats(self, since_timestamp: int) -> list[any]:

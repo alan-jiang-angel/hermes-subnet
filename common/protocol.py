@@ -5,11 +5,11 @@ import fastapi
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from loguru import logger
-from datetime import datetime, timedelta
 from langgraph.graph import MessagesState
 
 from agent.stats import ProjectUsageMetrics, TokenUsageMetrics
 from common.sqlite_manager import SQLiteManager
+import common.utils as utils
 
 
 # ===============  openai ================
@@ -128,7 +128,7 @@ class StatsMiddleware(BaseHTTPMiddleware):
         ]
 
     def handle_stats_html(self):
-        with open(f"common/stats.html", "r", encoding="utf-8") as f:
+        with open(f"common/stats_miner.html", "r", encoding="utf-8") as f:
             html = f.read()
         return fastapi.Response(content=html, media_type="text/html")
 
@@ -144,21 +144,8 @@ class StatsMiddleware(BaseHTTPMiddleware):
         }), media_type="application/json")
     
     def handle_token_stats(self, latest: str = '2h'):
-        # Calculate the cutoff timestamp based on latest parameter
-        current_time = datetime.now()
-        cutoff_time = None
-            
-        if 'min' in latest:
-            # Extract number before 'min'
-            value = int(latest.replace('min', ''))
-            cutoff_time = current_time - timedelta(minutes=value)
-        elif 'h' in latest:
-            # Extract number before 'h'
-            value = int(latest.replace('h', ''))
-            cutoff_time = current_time - timedelta(hours=value)
-            
-        if cutoff_time:
-            cutoff_timestamp = cutoff_time.timestamp()
+        # Use utils method to parse time range
+        cutoff_timestamp = utils.parse_time_range(latest)
         
         return fastapi.Response(content=json.dumps({
             "token_usage": self.token_usage_metrics.stats(since_timestamp=cutoff_timestamp),

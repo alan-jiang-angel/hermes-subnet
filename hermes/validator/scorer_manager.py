@@ -8,6 +8,7 @@ from loguru import logger
 from langchain.schema import HumanMessage
 import numpy as np
 import torch
+from agent.stats import Phase, TokenUsageMetrics
 from common import utils
 from common.prompt_template import SCORE_PROMPT
 from common.protocol import SyntheticNonStreamSynapse
@@ -31,10 +32,13 @@ class ScorerManager:
         ground_truth: str, 
         ground_cost: float, 
         miner_synapses: List[SyntheticNonStreamSynapse],
-        challenge_id: str = ""
+        challenge_id: str = "",
+        cid_hash: str = "",
+        token_usage_metrics: TokenUsageMetrics | None = None,
+        round_id: int = 0
     ) -> Tuple[List[float], List[float], List[float]]:
         ground_truth_scores_raw = await asyncio.gather(
-            *(self.cal_ground_truth_score(ground_truth, r) for r in miner_synapses)
+            *(self.cal_ground_truth_score(ground_truth, r, cid_hash, token_usage_metrics, round_id=round_id) for r in miner_synapses)
         )
         ground_truth_scores = [utils.fix_float(utils.safe_float_convert(s)) for s in ground_truth_scores_raw]
         elapse_time = [r.elapsed_time for r in miner_synapses]
@@ -44,7 +48,14 @@ class ScorerManager:
         logger.info(f"[ScorerManager] - {challenge_id} ground_truth_scores: {ground_truth_scores_raw}, elapse_time: {elapse_time}, elapse_weights: {elapse_weights}, zip_scores: {zip_scores}")
         return zip_scores, ground_truth_scores, elapse_weights
 
-    async def cal_ground_truth_score(self, ground_truth: str, miner_synapse: SyntheticNonStreamSynapse):
+    async def cal_ground_truth_score(
+            self,
+            ground_truth: str,
+            miner_synapse: SyntheticNonStreamSynapse,
+            cid_hash: str = "",
+            token_usage_metrics: TokenUsageMetrics | None = None,
+            round_id: int = 0
+        ):
         if not miner_synapse.response:
             return 0.0
         question_prompt = SCORE_PROMPT.format(
@@ -53,6 +64,9 @@ class ScorerManager:
         )
         try :
             summary_response = await self.llm_score.ainvoke([HumanMessage(content=question_prompt)])
+            if token_usage_metrics is not None:
+                token_usage_metrics.append(cid_hash, phase=Phase.GENERATE_MINER_GROUND_TRUTH_SCORE, response=summary_response, extra = {"round_id": round_id})
+
         except Exception as e:
             logger.error(f"[ScorerManager] - LLM scoring error: {e}")
             return 0.0

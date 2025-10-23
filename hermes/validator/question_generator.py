@@ -7,6 +7,7 @@ import difflib
 from langchain_openai import ChatOpenAI
 from loguru import logger
 
+from agent.stats import Phase, TokenUsageMetrics
 from agent.subquery_graphql_agent.base import GraphQLAgent
 from common.prompt_template import SYNTHETIC_PROMPT, SYNTHETIC_PROMPT_SUBQL
 
@@ -32,7 +33,14 @@ class QuestionGenerator:
         formatted += "\nGenerate a COMPLETELY DIFFERENT question with different metrics, addresses, or eras."
         return formatted
 
-    async def generate_question(self, cid_hash: str, entity_schema: str, llm: ChatOpenAI) -> str:
+    async def generate_question(
+            self,
+            cid_hash: str,
+            entity_schema: str,
+            llm: ChatOpenAI,
+            token_usage_metrics: TokenUsageMetrics | None = None,
+            round_id: int = 0
+        ) -> str:
         if not entity_schema:
             return ""
         if cid_hash not in self.project_question_history:
@@ -50,6 +58,10 @@ class QuestionGenerator:
         try:
             response = await llm.ainvoke([HumanMessage(content=prompt)])
             question = response.content.strip()
+
+            if token_usage_metrics is not None:
+                token_usage_metrics.append(cid_hash, phase=Phase.GENERATE_QUESTION, response=response, extra = {"round_id": round_id})
+
         except Exception as e:
             logger.error(f"Error generating question for project {cid_hash}: {e}")
             return ""

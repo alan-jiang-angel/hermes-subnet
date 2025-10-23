@@ -26,6 +26,7 @@ class SQLiteManager:
                 status_code INTEGER DEFAULT 200,
                 tool_hit TEXT DEFAULT '[]',
                 cost REAL DEFAULT 0,
+                token_usage_info TEXT DEFAULT '',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -42,11 +43,12 @@ class SQLiteManager:
         response_data: str,
         status_code: int = 200,
         tool_hit: str = '{}',
-        cost: float = 0.0
+        cost: float = 0.0,
+        token_usage_info: str = ''
     ):
         self.cursor.execute('''
-            INSERT INTO requests (type, source, task_id, project_id, cid, request_data, response_data, status_code, tool_hit, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (type, source, task_id, project_id, cid, request_data, response_data, status_code, tool_hit, cost))
+            INSERT INTO requests (type, source, task_id, project_id, cid, request_data, response_data, status_code, tool_hit, cost, token_usage_info) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (type, source, task_id, project_id, cid, request_data, response_data, status_code, tool_hit, cost, token_usage_info))
         self.connection.commit()
 
     def fetch_all(self) -> list[tuple[any, ...]]:

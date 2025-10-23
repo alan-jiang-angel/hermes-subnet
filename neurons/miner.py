@@ -26,7 +26,9 @@ from langchain_openai import ChatOpenAI
 from loguru import logger
 from loguru._logger import Logger
 from bittensor.core.stream import StreamingSynapse
-from agent.stats import Metrics
+from agent.stats import Phase, ProjectUsageMetrics, TokenUsageMetrics
+from common.prompt_template import SYS_CONTENT
+from langchain_core.messages import HumanMessage, SystemMessage
 from common.table_formatter import table_formatter
 from common.agent_manager import AgentManager
 from common.errors import ErrorCode
@@ -62,7 +64,8 @@ class Miner(BaseNeuron):
         try:
             super().start()
 
-            self.metrics = Metrics()
+            self.project_usage_metrics = ProjectUsageMetrics()
+            self.token_usage_metrics = TokenUsageMetrics()
 
             self.db_queue = asyncio.Queue()
             self.sqlite_manager = SQLiteManager(f".data/{self.role}.db")
@@ -76,7 +79,8 @@ class Miner(BaseNeuron):
             self.axon.app.add_middleware(
                 StatsMiddleware,
                 sqlite_manager=self.sqlite_manager,
-                metrics=self.metrics
+                project_usage_metrics=self.project_usage_metrics,
+                token_usage_metrics=self.token_usage_metrics,
             )
 
             def allow_all(synapse: CapacitySynapse) -> None:
@@ -152,7 +156,7 @@ class Miner(BaseNeuron):
                 status_code = item.get("status_code")
                 project_id = item.get("project_id")
 
-                target = self.metrics.synthetic_project_usage if type == 0 else self.metrics.organic_project_usage
+                target = self.project_usage_metrics.synthetic_project_usage if type == 0 else self.project_usage_metrics.organic_project_usage
                 target.incr(
                     project_id,
                     success=False if status_code != 200 else True
@@ -164,7 +168,7 @@ class Miner(BaseNeuron):
 
                 if tool_hit and tool_hit != '[]':
                     tool_hit_list = json.loads(tool_hit)
-                    target = self.metrics.synthetic_tool_usage if type == 0 else self.metrics.organic_tool_usage
+                    target = self.project_usage_metrics.synthetic_tool_usage if type == 0 else self.project_usage_metrics.organic_tool_usage
                     for tool_name, count in tool_hit_list:
                         target.incr(tool_name, count)
 
@@ -183,6 +187,7 @@ class Miner(BaseNeuron):
             log: Logger,
     ) -> SyntheticNonStreamSynapse | OrganicNonStreamSynapse:
         tag = "Synthetic"
+        phase = Phase.MINER_SYNTHETIC
         type = 0
         question = task.get_question()
         is_synthetic = True
@@ -191,9 +196,10 @@ class Miner(BaseNeuron):
             tag = "Organic"
             type = 1
             is_synthetic = False
+            phase = Phase.MINER_ORGANIC
 
         cid_hash = task.cid_hash
-        agent_graph, _, graphql_agent = self.agent_manager.get_miner_agent(cid_hash)
+        graph, graphql_agent = self.agent_manager.get_miner_agent(cid_hash)
 
         tool_hit = []
         answer = None
@@ -201,25 +207,31 @@ class Miner(BaseNeuron):
         error = None
         status_code = ErrorCode.SUCCESS
 
-        exclude_tools = [t.name for t in graphql_agent.tools]
+        # exclude_tools = [t.name for t in graphql_agent.tools]
+        exclude_tools = []
         before = time.perf_counter()
 
+        usage_info = ''
         try:
-            if not agent_graph:
+            if not graph:
                 log.warning(f"[{tag}] - {task.id} No agent found for project {cid_hash}")
                 error = f"No agent found for project {cid_hash}"
                 status_code = ErrorCode.AGENT_NOT_FOUND
             else:
-                r = await agent_graph.ainvoke(
-                    {"messages": [{"role": "user", "content": question}]},
-                    # config={"callbacks": [counter]}
-                )
+                messages = [SystemMessage(content=SYS_CONTENT), HumanMessage(content=question)]
+                # messages = [HumanMessage(content="Add 3 and 4. Multiply the output by 2. Divide the output by 5")]
+                r = await graph.ainvoke({"messages": messages})
+
+                usage_info = self.token_usage_metrics.append(cid_hash, phase, r)
 
                 # check tool stats
                 tool_hit = utils.try_get_tool_hit(
                     r.get('messages', []),
                     # exclude_tools=exclude_tools
                 )
+
+                if r.get('graphql_agent_hit', False):
+                    tool_hit.append(("graphql_agent_tool", 1))
 
                 answer = r.get('messages')[-1].content or None
                 if not answer:
@@ -269,6 +281,7 @@ class Miner(BaseNeuron):
             "status_code": task.status_code,
             "tool_hit": json.dumps(tool_hit),
             "cost": elapsed,
+            "token_usage_info": json.dumps(usage_info) if usage_info else ''
         })
         return task
 
@@ -436,7 +449,7 @@ class Miner(BaseNeuron):
         try:
             while True:
                 await asyncio.sleep(60 * 1)
-                logger.info(f"[MINER] usage stats: {json.dumps(self.metrics.stats())}")
+                logger.info(f"[MINER] usage stats: {json.dumps(self.project_usage_metrics.stats())}")
         except KeyboardInterrupt:
             logger.info("[Miner] Profile tools stats interrupted by user")
             raise  # Re-raise to allow graceful shutdown

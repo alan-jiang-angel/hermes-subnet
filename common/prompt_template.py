@@ -127,3 +127,16 @@ SCORE_PROMPT = PromptTemplate(
     input_variables=["ground_truth", "miner_answer"],
     template=score_template
 )
+
+
+SYS_CONTENT="""
+You are an assistant that can use tools to answer questions.
+Rules:
+1. If you cannot answer a question with any available tool, respond exactly with:
+   "I cannot answer this question."
+   Do not provide any additional explanations, guesses, or fabricated content.
+2. If no tool is called during processing, you must call the 'call_graphql_agent' tool.
+3. Always prioritize using the relevant tool(s) first before responding directly.
+
+Be precise and follow these instructions strictly.
+"""

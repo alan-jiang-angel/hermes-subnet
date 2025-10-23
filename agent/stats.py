@@ -1,5 +1,9 @@
 from langchain_core.callbacks import BaseCallbackHandler
-
+from enum import Enum
+from langchain_core.messages import BaseMessage
+from loguru import logger
+import common.utils as utils
+from datetime import datetime
 
 class ToolCountHandler(BaseCallbackHandler):
     counter: dict[str, int] = {}
@@ -50,7 +54,7 @@ class ToolCounter:
         return self.counter
 
 
-class Metrics:
+class ProjectUsageMetrics:
 
     def __init__(self):
         self._synthetic_tool_counter = ToolCounter()
@@ -81,3 +85,50 @@ class Metrics:
             "synthetic_project_usage": self.synthetic_project_usage.stats(),
             "organic_project_usage": self.organic_project_usage.stats()
         }
+
+
+class Phase(Enum):
+    GENERATE_QUESTION = "generate_question"
+    GENERATE_GROUND_TRUTH = "generate_ground_truth"
+    GENERATE_MINER_GROUND_TRUTH_SCORE = "ground_truth_score"
+
+    MINER_SYNTHETIC = "miner_synthetic_challenge"
+    MINER_ORGANIC = "miner_organic_challenge"
+
+class TokenUsageMetrics:
+    datas: list[any] = []
+
+    def __init__(self):
+        self.datas = []
+
+    def append(
+            self,
+            cid_hash: str,
+            phase: Phase,
+            response: BaseMessage | dict[str, any]
+        ) -> dict[str, int]:
+        extra_input_tokens = 0
+        extra_output_tokens = 0
+
+        if isinstance(response, dict):
+            messages = response.get('messages', [])
+            extra_input_tokens = response.get('intermediate_graphql_agent_input_token_usage', 0)
+            extra_output_tokens = response.get('intermediate_graphql_agent_output_token_usage', 0)
+        else:
+            messages = [response]
+
+        input_tokens, output_tokens = utils.extract_token_usage(messages)
+        logger.info(f"[TokenUsageMetrics] - append called with cid_hash: {cid_hash}, phase: {phase}, response: {response} input_tokens: {input_tokens}, output_tokens: {output_tokens}, extra_input_tokens: {extra_input_tokens}, extra_output_tokens: {extra_output_tokens}")
+
+        data = {
+            "cid_hash": cid_hash,
+            "phase": phase.value,
+            "input_tokens": input_tokens + extra_input_tokens,
+            "output_tokens": output_tokens + extra_output_tokens,
+            "timestamp":  int(datetime.now().timestamp())
+        }
+        self.datas.append(data) 
+        return data
+
+    def stats(self, since_timestamp: int) -> list[any]:
+        return [data for data in self.datas if data["timestamp"] > since_timestamp]

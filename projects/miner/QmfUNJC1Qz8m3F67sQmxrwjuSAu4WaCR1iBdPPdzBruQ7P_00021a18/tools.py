@@ -1,5 +1,4 @@
 import aiohttp
-from langchain_core.tools import tool
 from typing import Any, Dict
 
 async def request_subquery(options: Dict[str, Any]):
@@ -22,28 +21,26 @@ async def request_subquery(options: Dict[str, Any]):
             res = result.get("data", {}).get(options["type"])
         return res
 
-@tool
 async def query_indexer_rewards(indexer: str, era: str) -> int:
     """
     Query the total rewards for a specific indexer in a given era.
-     
+
     Do NOT call this tool when:
         1. The query is related to Stake, APY, Commission Rate or other non-reward metrics.
 
     Args:
-        indexer (str): The indexer address or identifier
-        era (str): Era number in two supported formats:
-                  - Hexadecimal format: e.g., "0x48"
-                  - Decimal format: e.g., "72" (equivalent to 0x48)
-    
+        indexer (str): The indexer address or identifier.
+        era (str): The era number. Supports two formats:
+            - Hexadecimal, e.g. "0x48"
+            - Decimal, e.g. "72" (equivalent to 0x48)
+
     Returns:
         int: Total rewards earned by the indexer in the specified era,
              returned in 18-decimal precision SQT (wei units).
-             Can be converted to ETH if needed (1 ETH = 10^18 wei).
-    
+
     Examples:
-        - query_indexer_rewards("indexer_address", "0x48")
-        - query_indexer_rewards("indexer_address", "72")
+        >>> await query_indexer_rewards("indexer_address", "0x48")
+        >>> await query_indexer_rewards("indexer_address", "72")
     """
 
     query = '''

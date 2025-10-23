@@ -5,8 +5,10 @@ import fastapi
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from loguru import logger
+from datetime import datetime, timedelta
+from langgraph.graph import MessagesState
 
-from agent.stats import Metrics
+from agent.stats import ProjectUsageMetrics, TokenUsageMetrics
 from common.sqlite_manager import SQLiteManager
 
 
@@ -93,7 +95,6 @@ class OrganicStreamSynapse(bt.StreamingSynapse):
 
     def deserialize(self):
         return ''
-    
 class OrganicNonStreamSynapse(BaseSynapse):
     completion: ChatCompletionRequest | None = None
     response: str | None = ''
@@ -104,15 +105,22 @@ class OrganicNonStreamSynapse(BaseSynapse):
         user_messages = [msg for msg in self.completion.messages if msg.role == "user"]
         user_input = user_messages[-1].content
         return user_input
-
 class StatsMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, sqlite_manager: SQLiteManager, metrics: Metrics):
+    def __init__(
+        self,
+        app,
+        sqlite_manager: SQLiteManager,
+        project_usage_metrics: ProjectUsageMetrics,
+        token_usage_metrics: TokenUsageMetrics
+    ):
         super().__init__(app)
         self.sqlite_manager = sqlite_manager
-        self.metrics = metrics
+        self.project_usage_metrics = project_usage_metrics
+        self.token_usage_metrics = token_usage_metrics
         self.allowed_path = [
             '/stats',
             '/stats/data',
+            '/stats/token_stats',
             '/CapacitySynapse',
             '/SyntheticNonStreamSynapse',
             '/OrganicNonStreamSynapse',
@@ -130,7 +138,32 @@ class StatsMiddleware(BaseHTTPMiddleware):
         else:
             data = self.sqlite_manager.fetch_all()
 
-        return fastapi.Response(content=json.dumps({"data": data, "usage": self.metrics.stats()}), media_type="application/json")
+        return fastapi.Response(content=json.dumps({
+            "data": data, 
+            "usage": self.project_usage_metrics.stats(),
+        }), media_type="application/json")
+    
+    def handle_token_stats(self, latest: str = '2h'):
+        # Calculate the cutoff timestamp based on latest parameter
+        current_time = datetime.now()
+        cutoff_time = None
+            
+        if 'min' in latest:
+            # Extract number before 'min'
+            value = int(latest.replace('min', ''))
+            cutoff_time = current_time - timedelta(minutes=value)
+        elif 'h' in latest:
+            # Extract number before 'h'
+            value = int(latest.replace('h', ''))
+            cutoff_time = current_time - timedelta(hours=value)
+            
+        if cutoff_time:
+            cutoff_timestamp = cutoff_time.timestamp()
+        
+        return fastapi.Response(content=json.dumps({
+            "token_usage": self.token_usage_metrics.stats(since_timestamp=cutoff_timestamp),
+            "time_range": latest if latest else "all",
+        }), media_type="application/json")
 
     async def dispatch(
         self, request: "fastapi.Request", call_next: "RequestResponseEndpoint"
@@ -143,7 +176,12 @@ class StatsMiddleware(BaseHTTPMiddleware):
             return self.handle_stats_html()
         elif path == '/stats/data':
             return self.handle_stats_data(int(request.query_params.get("since_id", 0)))
+        elif path == '/stats/token_stats':
+            return self.handle_token_stats(request.query_params.get("latest", "2h"))
         return await call_next(request)
 
-
+class ExtendedMessagesState(MessagesState):
+    graphql_agent_hit: bool
+    intermediate_graphql_agent_input_token_usage: int
+    intermediate_graphql_agent_output_token_usage: int
 

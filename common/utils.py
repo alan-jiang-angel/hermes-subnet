@@ -241,7 +241,31 @@ def format_openai_key() -> str:
         formatted_key = "****" if api_key else "Not Set"
     return formatted_key
 
+def extract_token_usage(messages: list[BaseMessage]) -> tuple[int, int]:
+    if not messages:
+        return 0, 0
+    
+    if not isinstance(messages, list):
+        messages = [messages]
+    
+    input_tokens = 0
+    output_tokens = 0
 
+    for m in messages:
+        if hasattr(m, 'usage_metadata') and m.usage_metadata:
+            usage = m.usage_metadata
+            input_tokens += usage.get("input_tokens", 0)
+            output_tokens += usage.get("output_tokens", 0)
+    return input_tokens, output_tokens
+
+def get_func_name(f):
+    if hasattr(f, "__name__"):
+        return f.__name__
+    elif hasattr(f, "func") and hasattr(f.func, "__name__"):
+        return f.func.__name__
+    else:
+        return str(f)
+    
 def fix_float(elapsed: float) -> float:
     return int(elapsed * 100) / 100
 
@@ -250,6 +274,12 @@ def safe_float_convert(s: str) -> float:
         return float(s)
     except Exception as e:
         return 0.0
+
+def is_array(obj) -> bool:
+    return isinstance(obj, (list, tuple))
+
+def is_list(obj) -> bool:
+    return isinstance(obj, list)
 
 def hash256(data: str) -> str:
     return hashlib.sha256(data.encode()).hexdigest()

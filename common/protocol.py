@@ -5,6 +5,7 @@ import fastapi
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from loguru import logger
+from langchain_core.messages import AnyMessage, SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import MessagesState
 
 from agent.stats import ProjectUsageMetrics, TokenUsageMetrics
@@ -92,12 +93,37 @@ class OrganicStreamSynapse(bt.StreamingSynapse):
         self.response = {"final_text": getattr(self, "_buffer", "")}
         return self.response
 
+    def to_messages(self) -> list[AnyMessage]:
+        if not self.completion:
+            return []
+        messages = []
+        for msg in self.completion.messages:
+            if msg.role == "system":
+                messages.append(SystemMessage(content=msg.content))
+            elif msg.role == "user":
+                messages.append(HumanMessage(content=msg.content))
+            elif msg.role == "assistant":
+                messages.append(AIMessage(content=msg.content))
+        return messages
 
     def deserialize(self):
         return ''
 class OrganicNonStreamSynapse(BaseSynapse):
     completion: ChatCompletionRequest | None = None
     response: str | None = ''
+
+    def to_messages(self) -> list[AnyMessage]:
+        if not self.completion:
+            return []
+        messages = []
+        for msg in self.completion.messages:
+            if msg.role == "system":
+                messages.append(SystemMessage(content=msg.content))
+            elif msg.role == "user":
+                messages.append(HumanMessage(content=msg.content))
+            elif msg.role == "assistant":
+                messages.append(AIMessage(content=msg.content))
+        return messages
 
     def get_question(self):
         if not self.completion:

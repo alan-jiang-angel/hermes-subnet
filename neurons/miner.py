@@ -191,12 +191,14 @@ class Miner(BaseNeuron):
         type = 0
         question = task.get_question()
         is_synthetic = True
+        messages = [SystemMessage(content=SYS_CONTENT), HumanMessage(content=question)]
 
         if isinstance(task, OrganicNonStreamSynapse):
             tag = "Organic"
             type = 1
             is_synthetic = False
             phase = Phase.MINER_ORGANIC
+            messages = task.to_messages()
 
         cid_hash = task.cid_hash
         graph, graphql_agent = self.agent_manager.get_miner_agent(cid_hash)
@@ -218,7 +220,7 @@ class Miner(BaseNeuron):
                 error = f"No agent found for project {cid_hash}"
                 status_code = ErrorCode.AGENT_NOT_FOUND
             else:
-                messages = [SystemMessage(content=SYS_CONTENT), HumanMessage(content=question)]
+                # messages = [SystemMessage(content=SYS_CONTENT), HumanMessage(content=question)]
                 # messages = [HumanMessage(content="Add 3 and 4. Multiply the output by 2. Divide the output by 5")]
                 r = await graph.ainvoke({"messages": messages})
 
@@ -295,31 +297,31 @@ class Miner(BaseNeuron):
         log = logger.bind(source=synapse.dendrite.hotkey)
         log.info(f"\n🤖 [Miner] Received organic stream: {synapse.completion}")
 
-        user_messages = [msg for msg in synapse.completion.messages if msg.role == "user"]
-        user_input = user_messages[-1].content
-
-        agent_graph, _, graphql_agent = self.agent_manager.get_miner_agent(synapse.cid_hash)
-
+        # user_messages = [msg for msg in synapse.completion.messages if msg.role == "user"]
+        # user_input = user_messages[-1].content
+        messages = synapse.to_messages()
+        graph, graphql_agent = self.agent_manager.get_miner_agent(synapse.cid_hash)
 
         async def token_streamer(send: Send):
-            # logger.info(f"\n🤖 [Miner] Starting agent stream for input: {user_input}, {agent_graph}")
+            # logger.info(f"\n🤖 [Miner] Starting agent stream: {messages}")
             # buffered_stream = []
             # active_checkpoint_ns = None
-            # async for event in agent_graph.astream_events({"messages": [{"role": "user", "content": user_input}]}, version="v2"):
-                # logger.info(f"oooooooooooooooooooooooo: {event}\n")
-                # if event["event"] == "on_chat_model_stream":
-                #     checkpoint_ns = event["metadata"].get("checkpoint_ns", "")
-                #     message = event["data"].get("chunk", {})
-                #     content = message.content
-                #     graph_node_name = checkpoint_ns.split(":")[0] if checkpoint_ns else "unknown"
-                #     logger.info(f"{event['metadata']} ---- {event['metadata'].get('langgraph_node','')} - {event['data']} -----graph_node_name: {graph_node_name} ==== {content} type: {type(content)}")
+            # async for event in graph.astream_events({"messages": messages}, version="v2"):
+            #     logger.info(f"oooooooooooooooooooooooo: {event}\n")
+            #     if event["event"] == "on_chat_model_stream":
+            #         checkpoint_ns = event["metadata"].get("checkpoint_ns", "")
+            #         message = event["data"].get("chunk", {})
+            #         content = message.content
+            #         words.append(content)
+            #         graph_node_name = checkpoint_ns.split(":")[0] if checkpoint_ns else "unknown"
+                    # logger.info(f"   {event['metadata']} ---- {event['metadata'].get('langgraph_node','')} - {event['data']} -----graph_node_name: {graph_node_name} ==== {content} type: {type(content)}")
 
-                #     if graph_node_name == "final_filter":
-                #         await send({
-                #                 "type": "http.response.body",
-                #                 "body": content.encode('utf-8'),
-                #                 "more_body": True
-                #         })
+                    # if graph_node_name == "final_filter":
+                    #     await send({
+                    #             "type": "http.response.body",
+                    #             "body": content.encode('utf-8'),
+                    #             "more_body": True
+                    #     })
 
                     # if active_checkpoint_ns is None:
                     #     active_checkpoint_ns = graph_node_name
@@ -341,6 +343,7 @@ class Miner(BaseNeuron):
                     #         "body": content.encode('utf-8'),
                     #         "more_body": True
                     #     })
+
             # for content in buffered_stream:
             #     # logger.info(f"\n🤖 [Miner] Agent chunk type: {type(content)}, content: {content}")
             #     await send({
@@ -351,11 +354,11 @@ class Miner(BaseNeuron):
             #     await asyncio.sleep(0.25)
 
             # useful for debug
-            async for event in agent_graph.astream({"messages": [{"role": "user", "content": user_input}]}, version="v2"):
+
+            async for event in graph.astream({"messages": messages}, version="v2"):
                 # logger.info(f"mmmmmmmmmmmmmmmmmmmm {event} {type(event)}\n")
-                if "final_filter" in event:
-                    message = event["final_filter"].get("messages", [])[-1].content
-                    # logger.info(f"final message: {message}")
+                for _, value in event.items():
+                    message = value.get("messages", [])[-1].content
                     idx = 0
                     while idx < len(message):
                         chunk = message[idx:idx+10]
@@ -366,6 +369,20 @@ class Miner(BaseNeuron):
                         })
                         await asyncio.sleep(0.25)
                         idx += 10
+                
+                # if "final_filter" in event:
+                #     message = event["final_filter"].get("messages", [])[-1].content
+                #     # logger.info(f"final message: {message}")
+                #     idx = 0
+                #     while idx < len(message):
+                #         chunk = message[idx:idx+10]
+                #         await send({
+                #             "type": "http.response.body",
+                #             "body": chunk.encode('utf-8'),
+                #             "more_body": True
+                #         })
+                #         await asyncio.sleep(0.25)
+                #         idx += 10
             await send({
                 "type": "http.response.body",
                 "body": b"",

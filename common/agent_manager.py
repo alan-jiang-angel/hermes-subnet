@@ -144,14 +144,16 @@ class AgentManager:
 
                 def graphql_agent_tool():
                     """
-                    This tool is automatically invoked when other specialized tools are unable to answer 
-                    the user's query, ensuring that the langgraph can still provide a meaningful response.
+                    This tool is automatically invoked when other specialized tools are unable to answer the user's query, ensuring that the langgraph can still provide a meaningful response.
+                    If you decide to use this tool, just return an empty AIMessage Content.
                     """
                     pass
 
                 async def call_graphql_agent(state: ExtendedMessagesState) -> dict:
                     messages = state["messages"]
                     human_messages = [m for m in messages if m.type == 'human']
+                    # logger.info(f" call_graphql_agent - messages: {messages} ")
+                    # logger.info(f" call_graphql_agent - human_messages: {human_messages} ")
                     if not human_messages:
                         return {"messages": [AIMessage(content="")]}
 
@@ -202,8 +204,11 @@ class AgentManager:
                     Call LLM with tools.
                     """
                     messages = state["messages"]
-                    message = await llm_with_tools.ainvoke(messages)
-                    return {"messages": [message]}
+                    # logger.info(f" call_model - messages: {messages} ")
+                    response_messages = await llm_with_tools.ainvoke(messages)
+
+                    # logger.info(f" call_model - response: {response_messages} ")
+                    return {"messages": [response_messages]}
 
                 builder = StateGraph(ExtendedMessagesState)
                 builder.add_node("call_model", call_model)

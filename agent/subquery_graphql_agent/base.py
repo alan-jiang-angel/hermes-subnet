@@ -13,6 +13,7 @@ from langgraph.prebuilt import create_react_agent
 from pydantic import ConfigDict
 
 from .tools import (
+    GraphQLQueryValidatorAndExecutedTool,
     GraphQLSchemaInfoTool,
     GraphQLTypeDetailTool,
     GraphQLQueryValidatorTool,
@@ -156,8 +157,9 @@ class GraphQLToolkit(BaseToolkit):
                 node_type=self.graphql_source.node_type
             ),
             GraphQLTypeDetailTool(graphql_source=self.graphql_source),
-            GraphQLQueryValidatorTool(graphql_source=self.graphql_source),
-            GraphQLExecuteTool(graphql_source=self.graphql_source)
+            GraphQLQueryValidatorAndExecutedTool(graphql_source=self.graphql_source),
+            # GraphQLQueryValidatorTool(graphql_source=self.graphql_source),
+            # GraphQLExecuteTool(graphql_source=self.graphql_source)
         ]
         
         return tools
@@ -212,6 +214,7 @@ class GraphQLAgent:
 
         # Initialize LLM
         model_name = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        logger.info(f"Initializing GraphQLAgent with model: {model_name}")
         self.llm = ChatOpenAI(
             model=model_name,
             temperature=0

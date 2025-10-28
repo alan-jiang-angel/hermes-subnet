@@ -153,13 +153,19 @@ class AgentManager:
                     messages = state["messages"]
                     human_messages = [m for m in messages if m.type == 'human']
                     # logger.info(f" call_graphql_agent - messages: {messages} ")
-                    # logger.info(f" call_graphql_agent - human_messages: {human_messages} ")
+                    logger.info(f" call_graphql_agent - human_messages: {human_messages} ")
                     if not human_messages:
                         return {"messages": [AIMessage(content="")]}
 
                     # user_input = messages[-1].content if len(messages) > 0 else ""
-                    response = await graphql_agent.executor.ainvoke({"messages": human_messages})
+                    response = await graphql_agent.executor.ainvoke(
+                        {"messages": human_messages},
+                        config={
+                            "recursion_limit": 12,
+                        }
+                    )
 
+                    logger.info(f" --------call_graphql_agent------ response: {response} ")
                     last = response['messages'][-1]
                     input_token_usage, output_token_usage = utils.extract_token_usage(response['messages'][0: -1])
 

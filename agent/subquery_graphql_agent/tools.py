@@ -4,6 +4,7 @@ import json
 import asyncio
 from typing import Optional, Type, Dict, Any, List
 from pydantic import BaseModel, Field, ConfigDict
+from loguru import logger
 
 import graphql
 from graphql import build_client_schema, validate, build_schema
@@ -472,8 +473,12 @@ class GraphQLQueryValidatorTool(BaseTool):
                 
                 # Use graphql-core's built-in validation
                 validation_errors = validate(schema, document)
-                
+
+                from loguru import logger
+
                 if validation_errors:
+                    logger.info(f"============================validattion error for query: {query}, {validation_errors}")
+
                     error_messages = [error.message for error in validation_errors]
                     return f"❌ Schema validation failed:\n" + "\n".join([f"- {error}" for error in error_messages])
                 else:
@@ -485,7 +490,139 @@ class GraphQLQueryValidatorTool(BaseTool):
         except Exception as e:
             return f"Error validating query: {str(e)}"
 
+class GraphQLQueryValidatorAndExecutedTool(BaseTool):
+    """
+    Tool to validate GraphQL query syntax and structure and execute GraphQL queries.
+    """
+    
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
+    name: str = "graphql_query_validator_execute"
+    description: str = """
+    Validate a GraphQL query string for syntax and basic structure and execute it if valid.
+    Input: Pass the GraphQL query as plain text without any formatting.
+    
+    CORRECT: { indexers(first: 1) { nodes { id } } }
+    WRONG: `{ indexers(first: 1) { nodes { id } } }`
+    WRONG: ```{ indexers(first: 1) { nodes { id } } }```
+    
+    The tool will automatically clean code blocks, backticks, and quotes.
+    """
+    args_schema: Type[BaseModel] = GraphQLQueryValidatorInput
+    
+    def __init__(self, graphql_source):
+        super().__init__()
+        self._graphql_source = graphql_source
+    
+    @property
+    def graphql_source(self):
+        return self._graphql_source
+    
+    def _run(
+        self,
+        query: str,
+        run_manager: Optional[CallbackManagerForToolRun] = None,
+    ) -> str:
+        """Validate GraphQL query synchronously."""
+        return asyncio.run(self._arun(query))
+    
+    async def _arun(
+        self,
+        query: str,
+        run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
+    ) -> str:
+        """Validate GraphQL query against schema."""
+        try:
+            # Clean up common formatting issues first
+            query = query.strip()
+            
+            # Remove code block markers (```...```)
+            if query.startswith('```') and query.endswith('```'):
+                query = query[3:-3].strip()
+                # Also remove language identifier if present (e.g., ```graphql)
+                lines = query.split('\n')
+                if lines and lines[0].strip() and not lines[0].strip().startswith('{'):
+                    query = '\n'.join(lines[1:]).strip()
+            
+            # Remove single backticks if present
+            if query.startswith('`') and query.endswith('`'):
+                query = query[1:-1].strip()
+            
+            # Remove quotes if present
+            if (query.startswith('"') and query.endswith('"')) or (query.startswith("'") and query.endswith("'")):
+                query = query[1:-1].strip()
+            
+            # Basic syntax validation
+            validation_errors = []
+            
+            # Check for basic GraphQL structure
+            if not query:
+                return "❌ Validation failed: Empty query"
+            
+            # Check for balanced braces
+            open_braces = query.count('{')
+            close_braces = query.count('}')
+            if open_braces != close_braces:
+                validation_errors.append(f"Unbalanced braces: {open_braces} opening, {close_braces} closing")
+            
+            # Check for balanced parentheses
+            open_parens = query.count('(')
+            close_parens = query.count(')')
+            if open_parens != close_parens:
+                validation_errors.append(f"Unbalanced parentheses: {open_parens} opening, {close_parens} closing")
+            
+            # Early return if basic syntax errors found
+            if validation_errors:
+                return f"❌ Basic syntax validation failed:\n" + "\n".join([f"- {error}" for error in validation_errors])
+            
+            # Advanced validation with GraphQL parser and schema
+            try:
+                # Parse the query
+                document = graphql.parse(query)
+                
+                # Get complete introspection result for proper validation
+                introspection_result = await self.graphql_source.get_schema()
+                
+                # Build GraphQL schema from introspection data (use data part only)
+                schema_data = introspection_result.get('data', None)
+                if not schema_data:
+                    return "❌ Schema validation failed: No data in introspection result"
+                
+                schema = build_client_schema(schema_data)
+                
+                # Use graphql-core's built-in validation
+                validation_errors = validate(schema, document)
 
+                if validation_errors:
+                    logger.info(f"============================validattion error for query: {query}, {validation_errors}")
+                    error_messages = [error.message for error in validation_errors]
+                    return f"❌ Schema validation failed:\n" + "\n".join([f"- {error}" for error in error_messages])
+                else:
+                    return await self._execute(query)
+                    
+            except Exception as parse_error:
+                return f"❌ Query parsing failed: {str(parse_error)}"
+            
+        except Exception as e:
+            return f"Error validating query: {str(e)}"
+    
+    async def _execute(self, query: str, variables: Optional[Dict[str, Any]] = None) -> str:
+        try:
+            result = await self.graphql_source.execute_query(query, variables)
+            if "errors" in result:
+                errors = result["errors"]
+                error_messages = [error.get("message", str(error)) for error in errors]
+                return f"❌ Query execution failed:\n" + "\n".join([f"- {msg}" for msg in error_messages])
+            
+            if "data" in result:
+                data = result["data"]
+                formatted_data = json.dumps(data, indent=2, ensure_ascii=False)
+                return f"✅ Query executed successfully:\n\n{formatted_data}"
+            
+            return f"⚠️ Unexpected response format:\n{json.dumps(result, indent=2)}"
+            
+        except Exception as e:
+            return f"Error executing query: {str(e)}"
 
 
 class GraphQLExecuteInput(BaseModel):

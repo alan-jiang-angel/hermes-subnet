@@ -383,9 +383,14 @@ Second query: {{ deploymentBoosterSummaries(first: 5, orderBy: DESC) {{ groupedA
 4. Never query for summary, statistics, or unrelated datasets unless explicitly requested.
 5. Each query must form a minimal and direct data path:
   - user question → relevant field(s) → answer.
+6. ⚠️ CRITICAL: Apply minimal field selection to ALL levels including nested relationships!
+   - Only query fields you actually need at EVERY level of the query
+   - Do NOT query extra fields in nested objects "just in case"
+   - Example: If you only need project.id, query "project {{ id }}" NOT "project {{ id owner metadata }}"
 
 ❌ Bad Minimal Examples — These are strictly forbidden:
-❌ Too broad:
+
+❌ Too broad - querying unrelated fields:
 {{ 
     indexers(first: 5) {{
         nodes {{
@@ -399,20 +404,94 @@ Second query: {{ deploymentBoosterSummaries(first: 5, orderBy: DESC) {{ groupedA
         }}
     }}
 }}
-❌ Mutiple Queries for same entity:
+
+❌ Multiple Queries for same entity:
+{{
+    indexer(id: 0x123) {{ id }}
+}}
 {{
     indexer(id: 0x123) {{ id }}
 }}
 
+❌ CRITICAL: Querying extra fields in nested relationships (VERY COMMON MISTAKE):
+# BAD - When you only need deployment.project.id:
 {{
-    indexer(id: 0x123) {{ id }}
+    deploymentBoosterSummaries(first: 5, orderBy: TOTAL_AMOUNT_DESC) {{
+        nodes {{
+            id
+            deployment {{
+                id
+                project {{
+                    id
+                    owner      # ← UNNECESSARY! Question doesn't need owner
+                    metadata   # ← UNNECESSARY! Question doesn't need metadata
+                }}
+            }}
+            totalAdded      # ← UNNECESSARY! Question doesn't need this
+            totalRemoved    # ← UNNECESSARY! Question doesn't need this
+            totalAmount
+            consumer        # ← UNNECESSARY! Question doesn't need consumer
+            createAt        # ← UNNECESSARY! Question doesn't need timestamps
+            updateAt        # ← UNNECESSARY! Question doesn't need timestamps
+        }}
+    }}
 }}
 
+❌ Querying @jsonField when not needed:
+{{
+    projects(first: 5) {{
+        nodes {{
+            id
+            metadata     # ← Only query if question asks about metadata
+            config       # ← Only query if question asks about config
+        }}
+    }}
+}}
 
 ✅ Correct Minimal Examples — You must always follow this pattern:
+
+✅ Only query fields actually needed:
 {{
     indexers(first: 5) {{ nodes {{ id totalStake }} }}
 }}
+
+✅ CORRECT: Minimal nested fields (only what's needed):
+# If question only needs deployment.id and deployment.project.id and totalAmount:
+{{
+    deploymentBoosterSummaries(first: 5, orderBy: TOTAL_AMOUNT_DESC) {{
+        nodes {{
+            id
+            deployment {{
+                id
+                project {{ id }}      # ← Only query project.id, nothing else!
+            }}
+            totalAmount              # ← Only totalAmount, no other amount fields
+        }}
+    }}
+}}
+
+✅ If you need deployment.metadata (which is @jsonField):
+{{
+    deploymentBoosterSummaries(first: 5) {{
+        nodes {{
+            id
+            deployment {{ 
+                id 
+                metadata     # ← OK to query @jsonField if needed
+                project {{ id }}
+            }}
+            totalAmount
+        }}
+    }}
+}}
+
+🔍 Before querying ANY field, ask yourself:
+- "Does the user's question explicitly need this field?" → If NO, don't query it
+- "Am I querying createAt/updateAt?" → Remove unless question asks about time
+- "Am I querying owner/consumer?" → Remove unless question asks about ownership
+- "Am I querying metadata/config (@jsonField)?" → Remove unless question asks about it
+- "Am I querying totalAdded/totalRemoved?" → Remove unless question asks about individual amounts
+- "Do I really need ALL fields in this nested object?" → If NO, only query what you need!
 
 🚫 Stop Condition Rules (CRITICAL - CHECK RESULTS FIRST)
 ⚠️ MANDATORY: ALWAYS check if current query results already contain the answer BEFORE making another query!
@@ -452,7 +531,7 @@ This is FORBIDDEN. Your first query should be correct. Do not experiment with qu
 ← FORBIDDEN! Do not "trial and error" with filters. Use a broader range from the start.
 
 # Even WORSE - Random illogical attempts:
-{{ indexers(first: 100, filter: {{ commissionEra: {{ greaterThanOrEqualTo: -10 }} }}) {{ nodes {{ id }} }} }}  ← WTF?
+{{ indexers(first: 100, filter: {{ commissionEra: {{ greaterThanOrEqualTo: -10 }} }}) {{ nodes {{ id }} }} }}  ← WTH?
 {{ indexers(first: 100, filter: {{ commissionEra: {{ greaterThanOrEqualTo: 75 }} }}) {{ nodes {{ id }} }} }}
 {{ indexers(first: 100, filter: {{ commissionEra: {{ greaterThanOrEqualTo: 70 }} }}) {{ nodes {{ id }} }} }}
 ← ABSOLUTELY FORBIDDEN! This is random guessing with no logic!

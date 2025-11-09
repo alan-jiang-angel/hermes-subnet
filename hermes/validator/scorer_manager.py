@@ -37,7 +37,7 @@ class ScorerManager:
         token_usage_metrics: TokenUsageMetrics | None = None,
         min_latency_improvement_ratio: float = 0.2,
         round_id: int = 0
-    ) -> Tuple[List[float], List[float], List[float]]:
+    ) -> Tuple[List[float], List[float], List[float], List[float]]:
         ground_truth_scores_raw = await asyncio.gather(
             *(self.cal_ground_truth_score(ground_truth, r, cid_hash, token_usage_metrics, round_id=round_id) for r in miner_synapses)
         )
@@ -47,7 +47,7 @@ class ScorerManager:
         zip_scores = [utils.fix_float(s * w) for s, w in zip(ground_truth_scores, elapse_weights)]
 
         logger.info(f"[ScorerManager] - {challenge_id} ground_truth_scores: {ground_truth_scores_raw}, elapse_time: {elapse_time}, elapse_weights: {elapse_weights}, zip_scores: {zip_scores}")
-        return zip_scores, ground_truth_scores, elapse_weights
+        return zip_scores, ground_truth_scores, elapse_weights, elapse_time
 
     async def cal_ground_truth_score(
             self,

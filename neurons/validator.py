@@ -379,15 +379,37 @@ async def main():
             while True:
                 try:
                     new_meta = await meta.pull()
+                    logger.info(f"Pulled new meta config: {new_meta}")
                     if new_meta.data:
                         new_min_latency_improvement_ratio = new_meta.data.get("min_latency_improvement_ratio", 0.2)
+                        new_benchmark_mode = new_meta.data.get("benchmark_mode", "sample")
+                        new_benchmark_sample_rate = new_meta.data.get("benchmark_sample_rate", 0.8)
+                        new_benchmark_batch_size = new_meta.data.get("benchmark_batch_size", 0)
 
                         if new_min_latency_improvement_ratio != meta_config.get("min_latency_improvement_ratio", 0.2):
                             meta_config.update({
                                 "min_latency_improvement_ratio": new_min_latency_improvement_ratio
                             })
                             logger.info(f"Updating min_latency_improvement_ratio from {meta_config.get('min_latency_improvement_ratio', 0.2)} to {new_min_latency_improvement_ratio}")
-                    
+
+                        if new_benchmark_mode != meta_config.get("benchmark_mode", "sample"):
+                            meta_config.update({
+                                "benchmark_mode": new_benchmark_mode
+                            })
+                            logger.info(f"Updating benchmark_mode from {meta_config.get('benchmark_mode', 'sample')} to {new_benchmark_mode}")
+
+                        if new_benchmark_sample_rate != meta_config.get("benchmark_sample_rate", 0.1):
+                            meta_config.update({
+                                "benchmark_sample_rate": new_benchmark_sample_rate
+                            })
+                            logger.info(f"Updating benchmark_sample_rate from {meta_config.get('benchmark_sample_rate', 0.1)} to {new_benchmark_sample_rate}")
+
+                        if new_benchmark_batch_size != meta_config.get("benchmark_batch_size", 0):
+                            meta_config.update({
+                                "benchmark_batch_size": new_benchmark_batch_size
+                            })
+                            logger.info(f"Updating benchmark_batch_size from {meta_config.get('benchmark_batch_size', 0)} to {new_benchmark_batch_size}")
+
                 except Exception as e:
                     logger.error(f"Failed to refresh meta config: {e}")
                 await asyncio.sleep(5 * 60 + random.randint(0, 30))

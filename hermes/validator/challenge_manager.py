@@ -2,6 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 import time
+import json
 import traceback
 from typing import Tuple, TYPE_CHECKING
 from uuid import uuid4
@@ -11,6 +12,8 @@ from loguru import logger
 from multiprocessing.synchronize import Event
 import numpy as np
 import torch
+
+from hermes.validator.benchmark import BenchMark
 if TYPE_CHECKING:
     from neurons.validator import Validator
 from agent.stats import Phase, TokenUsageMetrics
@@ -42,6 +45,7 @@ class ChallengeManager:
     event_stop: Event
     scores: torch.Tensor
     token_usage_metrics: TokenUsageMetrics
+    V: "Validator"
 
     def __init__(
         self, 
@@ -106,6 +110,7 @@ class ChallengeManager:
         self.miners_dict = miners_dict
         self.meta_config = meta_config
         self.event_stop = event_stop
+        self.V = v
 
         self._last_set_weight_time = 0
         # self.scores = torch.zeros_like(torch.tensor(self.settings.metagraph.S), dtype=torch.float32)
@@ -150,6 +155,7 @@ class ChallengeManager:
 
     async def challenge_loop(self):
         try:
+            benchmark = BenchMark(self.settings.wallet, self.meta_config)
             while not self.event_stop.is_set():
                 await asyncio.sleep(self.challenge_interval)
 
@@ -250,7 +256,7 @@ class ChallengeManager:
                     )
 
                     # score result
-                    zip_scores, ground_truth_scores, elapse_weights = await self.scorer_manager.compute_challenge_score(
+                    zip_scores, ground_truth_scores, elapse_weights, miners_elapse_time = await self.scorer_manager.compute_challenge_score(
                         ground_truth,
                         ground_cost,
                         responses,
@@ -261,6 +267,20 @@ class ChallengeManager:
                         round_id=self.round_id
                     )
                     project_score_matrix.append(zip_scores)
+
+                    await benchmark.upload(
+                        uid=self.V.uid,
+                        address=self.settings.wallet.hotkey.ss58_address,
+                        cid=cid_hash.split('_')[0],
+                        challenge_id=challenge_id,
+                        question=question,
+                        ground_cost=ground_cost,
+                        ground_truth_tools=[json.loads(t) for t in metrics_data.get("tool_calls", [])],
+                        miners_answer=[
+                            {"uid": uid, "address": hotkey, "elapsed": elapse_time, "truth_score": truth_score} 
+                            for uid, hotkey, elapse_time, truth_score in zip(uids, hotkeys, miners_elapse_time, ground_truth_scores)
+                        ],
+                    )
 
                     table_formatter.create_synthetic_miners_response_table(
                         round_id=self.round_id,

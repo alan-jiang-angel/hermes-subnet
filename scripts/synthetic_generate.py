@@ -1,48 +1,42 @@
 import asyncio
 import os
-
+from pathlib import Path
 import dotenv
 from langchain_openai import ChatOpenAI
 from loguru import logger
 from common.project_manager import ProjectManager
 from hermes.validator.question_generator import QuestionGenerator
-import agent.graphql_agent as subAgent
-dotenv.load_dotenv('.env')
+dotenv.load_dotenv('.env.validator')
 
 
-SUBQL_CID = 'QmfUNJC1Qz8m3F67sQmxrwjuSAu4WaCR1iBdPPdzBruQ7P'
-model_name = os.getenv("LLM_MODEL", "gpt-5")
+SUBQL_CID_HASH = 'QmfUNJC1Qz8m3F67sQmxrwjuSAu4WaCR1iBdPPdzBruQ7P_00021a18'
+model_name = os.getenv("LLM_MODEL")
 
 
 # python -m scripts.synthetic_generate
 if __name__ == "__main__":
-    projectManager = ProjectManager('./projects')
+    target_dir = Path(__file__).parent.parent / "projects" / "validator"
+    logger.info(f"Loading projects from {target_dir}")
 
-    manifest = asyncio.run(projectManager.pull_manifest(SUBQL_CID))
-    entity_schema = asyncio.run(projectManager.pull_schema(manifest))
+    pm = ProjectManager(llm=None, target_dir=target_dir)
+    projects_config = pm.load()
 
+    logger.info(f"Loaded {len(projects_config)} projects")
+    p = projects_config.get(SUBQL_CID_HASH)
     llm = ChatOpenAI(
         model=model_name,
         temperature=1
     )
 
-    asyncio.run(projectManager.register_project(SUBQL_CID, 'https://index-api.onfinality.io/sq/subquery/subquery-mainnet'))
-    server_agent = subAgent.initServerAgentWithConfig(projectManager.get_project(SUBQL_CID))
-
-
     count = 10
     question_generator = QuestionGenerator(max_history=count)
 
     logger.info(f"model_name: {model_name}")
-    logger.info(f"entity_schema: ({len(entity_schema)} chars)")
+    logger.info(f"entity_schema: ({len(p.schema_content)} chars)")
 
     for i in range(10):
-        question = asyncio.run(question_generator.generate_question(SUBQL_CID, entity_schema, llm))
+        question = asyncio.run(question_generator.generate_question(SUBQL_CID_HASH, p.schema_content, llm))
         logger.info(f"Generated question {i+1}/{count}: {question}")
-
-        # response = asyncio.run(server_agent.query_no_stream(question))
-        # ground_truth = response.get('messages', [])[-1].content
-        # logger.info(f"   ground_truth: {ground_truth}")
 
         logger.info(f"\n")
 

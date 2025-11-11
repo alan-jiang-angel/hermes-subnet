@@ -531,3 +531,53 @@ if __name__ == "__main__":
     logger.info(f"Cost Breakdown - Input: ${total_cost_info['input_cost']:.6f}, Cache: ${total_cost_info['cache_cost']:.6f}, Output: ${total_cost_info['output_cost']:.6f}")
 
 
+def append_to_jsonl(
+    file_path: str,
+    instruction: str,
+    question: str,
+    schema: str,
+    ground_truth_tools: list[dict],
+) -> bool:
+    """
+    Append a training sample to JSONL file.
+    
+    Args:
+        file_path: Path to the JSONL file
+        instruction: The instruction/prompt text
+        question: The natural language question
+        schema: The GraphQL schema content
+        ground_truth_tools: List of tool calls (will filter out graphql_schema_info)
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Filter out graphql_schema_info tool calls
+        filtered_tools = [
+            tool for tool in ground_truth_tools 
+            if tool.get("name") != "graphql_schema_info"
+        ]
+        
+        # Create the data structure
+        data = {
+            "instruction": instruction,
+            "input": {
+                "natural_language": question,
+                "schema": schema
+            },
+            "output": filtered_tools
+        }
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        # Append to file
+        with open(file_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(data, ensure_ascii=False) + '\n')
+        
+        logger.debug(f"Successfully appended sample to {file_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to append to JSONL file {file_path}: {e}")
+        return False

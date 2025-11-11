@@ -23,9 +23,9 @@ import random
 import traceback
 import torch.multiprocessing as mp
 import time
+from typing import TYPE_CHECKING
 from fastapi.responses import StreamingResponse
 from loguru import logger
-import bittensor as bt
 import uvicorn
 from multiprocessing.synchronize import Event
 from common.meta_config import MetaConfig
@@ -38,6 +38,9 @@ from common.settings import settings
 from hermes.validator.challenge_manager import ChallengeManager
 from hermes.base import BaseNeuron
 
+if TYPE_CHECKING:
+    import bittensor as bt
+
 ROLE = "validator"
 
 settings.load_env_file(ROLE)
@@ -49,7 +52,7 @@ HermesLogger.configure_loguru(
 )
 
 class Validator(BaseNeuron):
-    dendrite: bt.Dendrite
+    dendrite: "bt.Dendrite"
 
     @property
     def role(self) -> str:
@@ -57,10 +60,22 @@ class Validator(BaseNeuron):
     
     def __init__(self):
         super().__init__()
+        # Import bittensor here to avoid multiprocessing spawn issues
+        import bittensor as bt
         self.dendrite = bt.dendrite(wallet=self.settings.wallet)
         
         self.forward_miner_timeout = int(os.getenv("FORWARD_MINER_TIMEOUT", 60 * 3))  # seconds
         logger.info(f"Set forward miner timeout to {self.forward_miner_timeout} seconds")
+
+    async def cleanup(self):
+        """Clean up resources before shutdown"""
+        try:
+            if hasattr(self, 'dendrite') and self.dendrite:
+                # Close dendrite session properly using bittensor's async close method
+                await self.dendrite.aclose_session()
+                logger.info("Closed dendrite HTTP session")
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
 
     async def run_challenge(
             self,
@@ -124,6 +139,7 @@ class Validator(BaseNeuron):
             logger.error(f"Failed to serve API: {e}")
 
     async def run_miner_checking(self, miners_dict: dict):
+        import bittensor as bt
 
         async def handle_availability(
             metagraph: "bt.Metagraph",
@@ -183,9 +199,18 @@ class Validator(BaseNeuron):
             except Exception as e:
                 logger.error(f"Error in miner checking: {e}")
 
-            await asyncio.sleep(30)
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                logger.info("[CheckMiner] Shutting down gracefully...")
+                break
+        
+        # Clean up resources before exiting
+        await self.cleanup()
 
     async def forward_miner(self, cid_hash: str, body: ChatCompletionRequest):
+        import bittensor as bt
+        
         synapse = OrganicNonStreamSynapse(id=body.id, cid_hash=cid_hash, completion=body)
         try:
             available_miners = []
@@ -209,7 +234,7 @@ class Validator(BaseNeuron):
                 return synapse
 
 
-            dd: bt.Dendrite = self.dendrite
+            dd = self.dendrite
             if body.stream:
                 async def streamer():
                     synapse = OrganicStreamSynapse(cid_hash=cid_hash, completion=body)
@@ -287,14 +312,20 @@ def run_challenge(
     )
 
     logger.info(f"run_challenge process id: {os.getpid()}")
-    asyncio.run(Validator().run_challenge(
-        organic_score_queue,
-        synthetic_score,
-        miners_dict,
-        synthetic_token_usage,
-        meta_config,
-        event_stop
-    ))
+    try:
+        asyncio.run(Validator().run_challenge(
+            organic_score_queue,
+            synthetic_score,
+            miners_dict,
+            synthetic_token_usage,
+            meta_config,
+            event_stop
+        ))
+    except KeyboardInterrupt:
+        logger.info("Challenge process received shutdown signal, exiting gracefully...")
+    except Exception as e:
+        logger.error(f"Challenge process error: {e}")
+        raise
 
 def run_api(
         organic_score_queue: list,
@@ -310,7 +341,13 @@ def run_api(
     )
 
     logger.info(f"run_api process id: {os.getpid()}")
-    asyncio.run(Validator().run_api(organic_score_queue, miners_dict, synthetic_score, synthetic_token_usage))
+    try:
+        asyncio.run(Validator().run_api(organic_score_queue, miners_dict, synthetic_score, synthetic_token_usage))
+    except KeyboardInterrupt:
+        logger.info("API process received shutdown signal, exiting gracefully...")
+    except Exception as e:
+        logger.error(f"API process error: {e}")
+        raise
 
 def run_miner_checking(miners_dict: dict):
     proc = mp.current_process()
@@ -320,7 +357,13 @@ def run_miner_checking(miners_dict: dict):
     )
 
     logger.info(f"run_miner_checking process id: {os.getpid()}")
-    asyncio.run(Validator().run_miner_checking(miners_dict))
+    try:
+        asyncio.run(Validator().run_miner_checking(miners_dict))
+    except KeyboardInterrupt:
+        logger.info("MinerChecking process received shutdown signal, exiting gracefully...")
+    except Exception as e:
+        logger.error(f"MinerChecking process error: {e}")
+        raise
 
 async def main():
     with mp.Manager() as manager:
@@ -412,17 +455,49 @@ async def main():
 
                 except Exception as e:
                     logger.error(f"Failed to refresh meta config: {e}")
-                await asyncio.sleep(5 * 60 + random.randint(0, 30))
+                
+                try:
+                    await asyncio.sleep(5 * 60 + random.randint(0, 30))
+                except asyncio.CancelledError:
+                    logger.info("Meta config refresh task cancelled, shutting down...")
+                    raise KeyboardInterrupt()  # Trigger graceful shutdown
 
         except KeyboardInterrupt:
             event_stop.set()
             logger.info("KeyboardInterrupt detected. Shutting down gracefully...")
+            
+            # Give processes time to shutdown gracefully
+            for p in processes:
+                logger.info(f"Waiting for {p.name} to finish...")
+                p.join(timeout=5)
+                
+            # Terminate processes that didn't finish
+            for p in processes:
+                if p.is_alive():
+                    logger.warning(f"{p.name} still alive, terminating...")
+                    p.terminate()
+                    p.join(timeout=2)
+                    
+            # Force kill if still alive
+            for p in processes:
+                if p.is_alive():
+                    logger.error(f"{p.name} still alive after terminate, killing...")
+                    p.kill()
+                    p.join()
 
         except Exception as e:
             logger.error(f"Main loop error: {e}")
+            event_stop.set()
             raise
 
         finally:
+            logger.info("Cleaning up processes...")
+            # Ensure all processes are terminated
+            for p in processes:
+                if p.is_alive():
+                    p.terminate()
+                p.join(timeout=1)
+                
             utils.kill_process_group()
 
 if __name__ == "__main__":

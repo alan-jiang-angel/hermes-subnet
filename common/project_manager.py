@@ -50,42 +50,75 @@ class ProjectManager:
         if target_dir is not None:
             self.target_dir = Path(target_dir)
 
-    async def pull(self):
-        """pull projects from board service."""
+    async def pull(self, silent: bool = False):
+        """pull projects from board service with pagination."""
         headers = {
             "accept": "application/json",
             "Content-Type": "application/json",
         }
-        data = {
-            "enabled": True,
-            "limit": 50,
-            "offset": 0,
-        }
+        
         board_url = os.environ.get('BOARD_SERVICE')
         if not board_url:
             logger.error("[ProjectManager] BOARD_SERVICE environment variable is not set.")
             sys.exit(1)
+        
+        page_size = 50
+        offset = 0
+        total_fetched = 0
+        all_projects: list[Project] = []
+        
         async with aiohttp.ClientSession() as session:
-            async with session.post(f"{board_url}/project/list", headers=headers, json=data) as resp:
-                response_data = await resp.json()
-        parsed = ProjectListResponse(**response_data)
+            while True:
+                data = {
+                    "enabled": True,
+                    "limit": page_size,
+                    "offset": offset,
+                }
 
-        for project in parsed.data.data:
+                if not silent:
+                    logger.info(f"[ProjectManager] Fetching projects: offset={offset}, limit={page_size}")
+                async with session.post(f"{board_url}/project/list", headers=headers, json=data) as resp:
+                    response_data = await resp.json()
+                
+                parsed = ProjectListResponse(**response_data)
+                current_batch = parsed.data.data
+                all_projects.extend(current_batch)
+                total_fetched += len(current_batch)
+
+                if not silent:
+                    logger.info(f"[ProjectManager] Fetched {len(current_batch)} projects, total: {total_fetched}/{parsed.data.total}")
+
+                if total_fetched >= parsed.data.total or len(current_batch) == 0:
+                    break
+                
+                offset += page_size
+
+        if not silent:
+            logger.info(f"[ProjectManager] Total projects fetched: {len(all_projects)}")
+
+        # Process all fetched projects
+        for project in all_projects:
             cid = project.metadata.cid
             combined = f"{cid}{project.metadata.endpoint}"
             hash_value = utils.hash256(combined)[:8]
             key = f"{cid}_{hash_value}"
             self.projects.update({key: project})
 
-        # self.projects.update({project.metadata.cid: project for project in parsed.data.data})
-
         for cid_hash, project in self.projects.items():
             if ALLOWED_CID and project.metadata.cid not in ALLOWED_CID:
                 logger.warning(f"[ProjectManager] Project {project.metadata.cid} is not in the allowed list.")
                 continue
-            await self.register_project(cid_hash, project.metadata.endpoint)
-        return parsed
-    
+
+            existing_config = self._load_existing_project(cid_hash)
+            if existing_config:
+                if cid_hash not in self.projects_config:
+                    if not silent:
+                        logger.info(f"[ProjectManager] Loading existing project: {existing_config.domain_name} ({cid_hash})")
+                    self.projects_config[cid_hash] = existing_config
+            else:
+                # Register projects
+                await self.register_project(cid_hash, project.metadata.endpoint)
+        
     def load(self):
         projects = {}
         for project_dir in self.target_dir.iterdir():
@@ -167,14 +200,6 @@ class ProjectManager:
 
     async def register_project(self, cid_hash: str, endpoint: str) -> ProjectConfig:
         try:
-            # Check if project already exists locally
-            existing_config = self._load_existing_project(cid_hash)
-            if existing_config:
-                if cid_hash not in self.projects_config:
-                    logger.info(f"[ProjectManager] Loading existing project: {existing_config.domain_name} ({cid_hash})")
-                    self.projects_config[cid_hash] = existing_config
-                return existing_config
-
             # Project doesn't exist locally, need to analyze with LLM
             logger.info(f"[ProjectManager] Analyzing new project: {cid_hash} at {endpoint}")
             cid = cid_hash.split('_')[0]

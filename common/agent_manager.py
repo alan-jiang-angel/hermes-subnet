@@ -55,9 +55,9 @@ class AgentManager:
         self.project_manager = ProjectManager(self.llm_synthetic, self.save_project_dir)
 
 
-    async def start(self, pull=True, role: Literal["", "validator", "miner"] = ""):
+    async def start(self, pull=True, role: Literal["", "validator", "miner"] = "", silent: bool = False):
         if pull:
-            await self.project_manager.pull()
+            await self.project_manager.pull(silent=silent)
         else:
             self.project_manager.load()
 

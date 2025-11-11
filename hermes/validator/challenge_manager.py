@@ -544,6 +544,6 @@ class ChallengeManager:
         try:
             while not self.event_stop.is_set():
                 await asyncio.sleep(self.refresh_agents_interval)
-                await self.agent_manager.start(pull=True, role="validator")
+                await self.agent_manager.start(pull=True, role="validator", silent=True)
         except Exception as e:
             logger.error(f"[ChallengeManager] refresh_agents error: {e}")

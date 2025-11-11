@@ -455,10 +455,12 @@ class Miner(BaseNeuron):
         logger.info(f"[MINER] Using LLM model: {model} for miner self-owned agent")
         logger.info(f"[MINER] Using KEY: {utils.format_openai_key()}")
 
+        silent = False
         while True:
             try:
-                await self.agent_manager.start(mode == "pull", role="miner")
+                await self.agent_manager.start(mode == "pull", role="miner", silent=silent)
                 await asyncio.sleep(refresh_agents_interval)
+                silent = True
             except Exception as e:
                 logger.error(f"refresh_agents error: {e}")
 

@@ -220,91 +220,27 @@ class GraphQLSchemaInfoTool(BaseTool):
 ✅ {{ rewards {{ groupedAggregates(groupBy: [ERA, INDEXER_ID], having: {{ era: {{ greaterThan: 100 }} }}) {{ keys, sum {{ amount }} }} }} }}
 
 
-When Constructing GraphQL queries, You Must follow these strict rules:
+⚠️ CRITICAL QUERY CONSTRUCTION RULES:
 
-🚫 GraphQL Query Pagination Rules (STRICT)
-1. Every list field MUST have a `first:` parameter.
-2. The value of first must always be ≤ 5, unless the user explicitly asks for a larger number.
-3. This rule applies recursively, including all nested connection fields such as: nodes, edges, items, delegations, deploymentBoosterSummaries, etc.
-4. You must never use first: 100 or first: 50 or any value > 5 without explicit user request.
-5. If you are unsure whether a field supports pagination, assume it does and apply first: 5.
-6. ⚠️ CRITICAL: NEVER re-query with different pagination values (first: 5 → first: 50). Use your first result!
+� PAGINATION (STRICT):
+- ALWAYS use `first: 5` for all list fields (including nested)
+- NEVER use first > 5 without explicit user request
+- NEVER re-query with different pagination (first: 5 → first: 50)
+- Apply recursively to: nodes, edges, items, delegations, etc.
 
-❌ Bad Pagination Examples — These are strictly forbidden:
-# Missing pagination
-{{ indexers {{ nodes {{ id }}  }} }}
-{{ indexers {{ delegations {{ nodes {{ id }} }}   }} }}
-{{ indexer(id: xxx) {{ delegations {{ nodes {{ id }} }} }} }}
+✅ {{ indexers(first: 5) {{ delegations(first: 5) {{ nodes {{ id }} }} }} }}
+❌ {{ indexers {{ nodes {{ id }} }} }} (missing first)
+❌ {{ indexers(first: 50) {{ nodes {{ id }} }} }} (too large)
 
-# Overly large pagination (FORBIDDEN)
-{{ indexers(first: 50) {{ nodes {{ id }}  }} }}
-{{ indexers(first: 100) {{ nodes {{ id }}  }} }}
-{{ deployments(first: 50, orderBy: DESC) {{ nodes {{ id }} }} }}  ← NEVER use first: 50!
+� QUERY CONSOLIDATION:
+- Combine independent queries into ONE using aliases
+- Sequential queries OK only if data dependency exists
+- NEVER query same entity multiple times for different fields
 
-# Re-querying with different pagination (CRITICAL VIOLATION)
-First query:  {{ deployments(first: 5) {{ nodes {{ id }} }} }}
-Second query: {{ deployments(first: 50) {{ nodes {{ id }} }} }}  ← FORBIDDEN! Use first result!
-
-✅ Correct Pagination Examples — You must always follow this pattern:
-{{ indexers(first: 5) {{ delegations(first: 5) {{ nodes {{ id }} }}   }} }}
-{{ indexer(id: xxx) {{ delegations(first: 5) {{ nodes {{ id }}  }} }} }}
-{{ deployments(first: 5, orderBy: AMOUNT_DESC) {{ nodes {{ id amount }} }} }}
-
-🚫 Query Consolidation Rules (MANDATORY - Minimize Queries)
-⚠️ CRITICAL: Minimize the number of GraphQL queries. Combine when possible!
-
-Rules:
-1. If queries are INDEPENDENT (no data dependency) → MUST combine into ONE query using aliases
-2. If second query DEPENDS on first query result (e.g., needs an ID) → Sequential queries are ALLOWED
-3. NEVER query the same entity multiple times for fields that could be fetched together
-4. Always prefer fewer queries over more queries
-
-✅ ALLOWED: Sequential queries with data dependency
-Example: "Find highest stake indexer, then get its delegations"
-First query: {{ indexers(first: 1, orderBy: TOTAL_STAKE_DESC) {{ nodes {{ id }} }} }}
-Second query: {{ indexer(id: "result_from_first") {{ id totalStake delegations(first: 5) {{ nodes {{ id }} }} }} }}
-→ This is OK because second query needs the ID from first query
-    
-❌ FORBIDDEN: Multiple queries without data dependency
-# Bad - these could be combined (WRONG)
-First query: {{ indexers(first: 5) {{ nodes {{ id }} }} }}
-Second query: {{ delegations(first: 5) {{ nodes {{ id }} }} }}  ← These are independent!
-
-# Bad - querying same entity for different fields (WRONG)
-First query: {{ indexer(id: "0x123") {{ id totalStake }} }}
-Second query: {{ indexer(id: "0x123") {{ delegations(first: 5) {{ nodes {{ id }} }} }} }}  ← Should combine!
-
-# Bad - querying same collection separately for nodes and aggregates (WRONG)
-First query: {{ deploymentBoosterSummaries(first: 5, orderBy: DESC) {{ nodes {{ id }} }} }}
-Second query: {{ deploymentBoosterSummaries(first: 5, orderBy: DESC) {{ groupedAggregates {{ ... }} }} }}
-← Should combine! You can query nodes AND aggregates in ONE query!
-
-✅ CORRECT: Combine independent queries
-{{
-    indexers(first: 5) {{ nodes {{ id totalStake }} }}
-    delegations(first: 5) {{ nodes {{ id amount }} }}
-}}
-
-✅ CORRECT: Combine all fields for same entity
-{{
-    indexer(id: "0x123") {{ 
-        id 
-        totalStake 
-        delegations(first: 5) {{ nodes {{ id amount }} }}
-    }}
-}}
-
-✅ CORRECT: Query nodes AND aggregates together
-{{
-    deploymentBoosterSummaries(first: 5, orderBy: TOTAL_AMOUNT_DESC) {{
-        nodes {{ id totalAmount consumer }}
-        groupedAggregates(groupBy: [DEPLOYMENT_ID]) {{
-            keys
-            sum {{ totalAdded totalRemoved totalAmount }}
-        }}
-    }}
-}}
-← Both nodes and aggregates in ONE query!
+✅ {{ indexer(id: "0x123") {{ id totalStake delegations(first: 5) {{ nodes {{ id }} }} }} }}
+✅ {{ indexers(first: 5) {{ nodes {{ id }} }} delegations(first: 5) {{ nodes {{ id }} }} }}
+❌ Query indexer twice for different fields
+❌ Query nodes and aggregates separately
 
 🚫 Minimal Query Rules (CRITICAL - ONLY QUERY ESSENTIAL FIELDS)
 1. Must Query only the fields that are directly relevant to answering the user's question.

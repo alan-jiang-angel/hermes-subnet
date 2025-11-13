@@ -27,6 +27,7 @@ from langchain_core.messages import SystemMessage
 from agent.stats import ToolCountHandler
 from agent.subquery_graphql_agent.base import GraphQLAgent
 from common.project_manager import ProjectConfig, ProjectManager
+from common.prompt_template import get_block_rule_prompt
 from common.protocol import ExtendedMessagesState
 import common.utils as utils
 
@@ -166,22 +167,21 @@ class AgentManager:
                         if not human_messages:
                             return {"messages": [AIMessage(content="")]}
 
-                        # Get block_height from state, default to 0 if not present
                         block_height = state.get("block_height", 0) if isinstance(state, dict) else getattr(state, "block_height", 0)
-                        # sys_msg = BLOCK_HEIGHT_RULE_PROMPT.format(block_height=block_height)
-                        # messages_with_system = [SystemMessage(content=sys_msg)] + human_messages
-                        start_time = time.perf_counter()
-                        prompt_cache_key=f"{agent.config.cid_hash}_{start_time}"
+
+                        msgs = [
+                            SystemMessage(content=get_block_rule_prompt(block_height, agent.config.node_type))
+                        ] + human_messages
 
                         response = await agent.executor.ainvoke(
-                            {"messages": human_messages},
+                            {"messages": msgs},
                             config={
                                 "recursion_limit": 12,
                                 "configurable": {
                                     "block_height": block_height,
                                 }
                             },
-                            prompt_cache_key=prompt_cache_key
+                            prompt_cache_key=f"{agent.config.cid_hash}_{time.perf_counter()}"
                         )
                         if enable_log:
                             logger.info(f" --------call_graphql_agent------ response: {response} ")
@@ -233,16 +233,19 @@ class AgentManager:
                 
                 llm_with_tools = self.llm_synthetic.bind_tools(miner_tools + [graphql_agent_tool] if enable_fallback else [])
 
-                async def call_model(state: ExtendedMessagesState) -> int:
-                    """
-                    Call LLM with tools.
-                    """
-                    messages = state["messages"]
-                    # logger.info(f" call_model - messages: {messages} ")
-                    response_messages = await llm_with_tools.ainvoke(messages)
+                def make_call_model(llm: ChatOpenAI):
+                    async def call_model_func(state: ExtendedMessagesState) -> int:
+                        """
+                            Call LLM with tools.
+                        """
+                        messages = state["messages"]
+                        # logger.info(f" call_model - messages: {messages} ")
+                        response_messages = await llm.ainvoke(messages)
 
-                    logger.info(f" call_model - response: {response_messages} ")
-                    return {"messages": [response_messages]}
+                        return {"messages": [response_messages]}
+                    return call_model_func
+
+                call_model = make_call_model(llm_with_tools)
 
                 builder = StateGraph(ExtendedMessagesState)
                 builder.add_node("call_model", call_model)

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 import os
 import logging
 from typing import List, Optional, Dict, Any
-from abc import ABC, abstractmethod
 
 from langchain_core.tools import BaseTool
 from langchain_core.language_models import BaseLanguageModel
@@ -12,6 +11,8 @@ from langchain_openai import ChatOpenAI
 from langchain.agents.agent_toolkits.base import BaseToolkit
 from langgraph.prebuilt import create_react_agent
 from pydantic import ConfigDict
+
+from common.prompt_template import get_block_rule_prompt
 
 from .tools import (
     GraphQLQueryValidatorAndExecutedTool,
@@ -276,7 +277,10 @@ class GraphQLAgent:
 
         response = await temp_executor.ainvoke(
             {
-                "messages": [{"role": "user", "content": question}],
+                "messages": [
+                    {"role": "system", "content": get_block_rule_prompt(block_height, self.config.node_type)},
+                    {"role": "user", "content": question}
+                ],
             },
             config={
                 "recursion_limit": 12,

@@ -209,8 +209,6 @@ class Validator(BaseNeuron):
         await self.cleanup()
 
     async def forward_miner(self, cid_hash: str, body: ChatCompletionRequest):
-        import bittensor as bt
-        
         synapse = OrganicNonStreamSynapse(id=body.id, cid_hash=cid_hash, completion=body)
         try:
             available_miners = []

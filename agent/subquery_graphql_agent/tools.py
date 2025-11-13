@@ -71,21 +71,20 @@ class GraphQLSchemaInfoTool(BaseTool):
             block_height = 0
             if config and "configurable" in config:
                 block_height = config["configurable"].get("block_height", 0)
-            # logger.info(f"[GraphQLSchemaInfoTool._arun] block_height from config: {block_height}")
 
             # Get raw schema from GraphQL source
             schema_content = self.graphql_source.entity_schema
             
             # Generate appropriate schema info based on node type
             if self._node_type == GraphqlProvider.THE_GRAPH:
-                return create_thegraph_schema_info_content(schema_content, block_height)
+                return self._generate_thegraph_info(schema_content)
             elif self._node_type == GraphqlProvider.SUBQL:
-                return self._generate_subql_info(schema_content, block_height)
+                return self._generate_subql_info(schema_content)
             
         except Exception as e:
             return f"Error reading schema info: {str(e)}"
 
-    def _generate_subql_info(self, schema_content: str, block_height: int) -> str:
+    def _generate_subql_info(self, schema_content: str) -> str:
         """Generate SubQL-specific schema information."""
         return f"""📖 SUBQL (POSTGRAPHILE v4) SCHEMA & RULES:
 
@@ -449,36 +448,6 @@ If looking for recent indexers by commission era:
 - If you used orderBy: DESC, the FIRST result is the highest/maximum
 - first: 5 is enough for most questions - don't re-query with first: 50
 - Use what you already have!
-
-🚨 CRITICAL BLOCK HEIGHT RULE:
-- CURRENT BLOCK HEIGHT: ##{block_height}##
-- IF CURRENT BLOCK HEIGHT is NOT 0 (non-zero value):
-  * ALL GraphQL queries MUST include the blockHeight parameter
-  * Set blockHeight to the CURRENT BLOCK HEIGHT value
-  * This ensures queries return data at the specified block state
-  
-  ✅ CORRECT (when CURRENT BLOCK HEIGHT = 5460865):
-  {{
-    indexers(first: 5, blockHeight: "5460865") {{ nodes {{ id totalStake }} }}
-  }}
-  
-  {{
-    indexer(id: "0x123", blockHeight: "5460865") {{ id totalStake }}
-  }}
-  
-  {{
-    deployments(first: 5, orderBy: AMOUNT_DESC, blockHeight: "5460865") {{ nodes {{ id amount }} }}
-  }}
-  
-  ❌ WRONG (missing blockHeight when CURRENT BLOCK HEIGHT is non-zero):
-  {{
-    indexers(first: 5) {{ nodes {{ id totalStake }} }}
-  }}
-  
-- IF CURRENT BLOCK HEIGHT is 0:
-  * Do NOT add blockHeight parameter to queries
-  * Query normally without blockHeight
-
   
 💡 NOW USE THE RAW SCHEMA ABOVE TO:
 1. Find @entity types (e.g., Project, Indexer) 
@@ -488,7 +457,7 @@ If looking for recent indexers by commission era:
 5. Validate the query, then execute it
 
 DO NOT call graphql_schema_info again - everything needed is above."""
-    
+
     def _generate_thegraph_info(self, schema_content: str) -> str:
         """Generate The Graph-specific schema information."""
         return create_thegraph_schema_info_content(schema_content)
@@ -789,49 +758,6 @@ class GraphQLQueryValidatorAndExecutedTool(BaseTool):
     description: str = """
     Validate a GraphQL query string for syntax and basic structure and execute it if valid.
     Input: Pass the GraphQL query as plain text without any formatting.
-
-    🛑 CRITICAL RULES BEFORE USING THIS TOOL:
-    1. After calling this tool, CHECK the result immediately
-    2. If the result contains the answer to the question → DO NOT call this tool again
-    3. If you used orderBy with DESC → The FIRST result is the maximum/highest value
-    4. DO NOT call this tool again with different 'first' values (first: 5 → first: 1) - use what you got!
-    5. DO NOT call this tool to "verify" or "double-check" - trust your first query result
-    6. DO NOT incrementally adjust filters (>= 85 → >= 84 → >= 83) - use broader range from start!
-    7. DO NOT randomly try filter values (>= -10 → >= 75 → >= 70) - THINK about logic first!
-    8. If first query is empty → STOP, THINK about reasonable filter range, then query ONCE more
-    9. DO NOT query same collection separately for nodes and aggregates - combine in ONE query!
-
-    Example of CORRECT usage:
-    Query: "Which deployment has highest amount?"
-    1. Call tool with: deployments(first: 5, orderBy: AMOUNT_DESC) { nodes { id amount } }
-    2. Result: [{ id: "0x1", amount: 1000 }, ...]
-    3. Answer immediately: "Deployment 0x1 has the highest amount of 1000"
-    4. DO NOT call tool again! ← Important!
-
-    Example of WRONG usage (DO NOT DO THIS):
-    1. Call tool with: deployments(first: 5, orderBy: DESC) → Get result
-    2. Call tool again with: deployments(first: 1, orderBy: DESC) ← WRONG! Already got answer!
-    
-    3. Or incrementally adjust filters (FORBIDDEN):
-       - First: indexers(filter: { commissionEra >= 85 }) → Empty
-       - Then: indexers(filter: { commissionEra >= 84 }) ← WRONG!
-       - Then: indexers(filter: { commissionEra >= 83 }) ← WRONG!
-       
-    4. Or randomly try values (ABSOLUTELY FORBIDDEN):
-       - First: indexers(filter: { commissionEra >= -10 }) → Too broad/nonsensical
-       - Then: indexers(filter: { commissionEra >= 75 }) ← Random guess!
-       - Then: indexers(filter: { commissionEra >= 70 }) ← Still guessing!
-       
-    5. Or query same collection separately for nodes and aggregates (FORBIDDEN):
-       - First: deploymentBoosterSummaries(first: 5) { nodes { id } }
-       - Then: deploymentBoosterSummaries(first: 5) { groupedAggregates { ... } }
-       ← WRONG! Query nodes AND aggregates together in ONE query!
-       
-    ✅ CORRECT: Think first, then query with reasonable range:
-       indexers(filter: { commissionEra >= 50 }) or remove filter if unsure
-    
-    ✅ CORRECT: Query nodes and aggregates together:
-       deploymentBoosterSummaries(first: 5) { nodes { id } groupedAggregates { ... } }
 
     CORRECT: { indexers(first: 1) { nodes { id } } }
     WRONG: `{ indexers(first: 1) { nodes { id } } }`

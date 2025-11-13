@@ -5,14 +5,13 @@ Provides specialized tools and prompts for The Graph protocol nodes,
 which have different schema patterns compared to SubQL nodes.
 """
 
-def create_thegraph_schema_info_content(schema_content: str, block_height: int) -> str:
+def create_thegraph_schema_info_content(schema_content: str) -> str:
     """
     Create The Graph-specific schema information content.
     
     Args:
         schema_content: Raw GraphQL schema string
-        entities: List of entity names extracted from schema
-        relationships: Entity relationship mapping
+        block_height: Current block height for time-travel queries
         
     Returns:
         Formatted schema information string for The Graph
@@ -150,32 +149,6 @@ def create_thegraph_schema_info_content(schema_content: str, block_height: int) 
 ✅ {{ swaps(where: {{ _or: [{{ amount0_gt: "100" }}, {{ amount1_gt: "100" }}] }}) {{ id, amount0, amount1 }} }}
 ✅ {{ tokens(where: {{ symbol_starts_with_nocase: "uni" }}) {{ id, symbol, name }} }}
 ✅ {{ positions(where: {{ owner_not: "0x0000", liquidity_gt: "0" }}) {{ id, owner, liquidity }} }}
-
-🚨 CRITICAL BLOCK HEIGHT RULE:
-- CURRENT BLOCK HEIGHT: ##{block_height}##
-- IF CURRENT BLOCK HEIGHT is NOT 0 (non-zero value):
-  * ALL GraphQL queries MUST include the blockHeight parameter
-  * Set blockHeight to the CURRENT BLOCK HEIGHT value
-  * This ensures queries return data at the specified block state
-  
-✅ CORRECT (when CURRENT BLOCK HEIGHT = 4331513):
-  {{
-    swap(
-      id: "0x0000250ebe403453ebbaaf1e4499e36804b0bea7bf004d0eba24d5d05654317e-1"
-      block: {{number: 4331513}}
-    ) {{
-      id
-      to
-    }}
-  }}
-
-  ❌ WRONG (missing block parameter when CURRENT BLOCK HEIGHT is non-zero):
-  {{
-    swap(id: "0x0000250ebe403453ebbaaf1e4499e36804b0bea7bf004d0eba24d5d05654317e-1") {{
-      id
-      to
-    }}
-  }}
 
 💡 NOW USE THE RAW SCHEMA ABOVE TO:
 1. Find @entity types (e.g., User, Token, Transfer)

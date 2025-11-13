@@ -249,7 +249,7 @@ SCORE_PROMPT = PromptTemplate(
     template=score_template
 )
 
-def get_miner_self_tool_prompt(block_height: int = 0, node_type: str = "") -> str:
+def get_block_rule_prompt(block_height: int = 0, node_type: str = "") -> str:
     if node_type == "subql":
         example = """✅ CORRECT (when CURRENT BLOCK HEIGHT = 5460865):
   {{
@@ -291,20 +291,32 @@ def get_miner_self_tool_prompt(block_height: int = 0, node_type: str = "") -> st
         example = ""
     
     return f"""
+🚨 CRITICAL BLOCK HEIGHT RULE:
+- CURRENT BLOCK HEIGHT: ##{block_height}##
+- IF user's question explicitly mentions a specific block height:
+  * Use the block height from user's question
+  * Example: "What was the state at block 5000000?" → Use blockHeight: "5000000"
+- ELSE IF CURRENT BLOCK HEIGHT is NOT 0 (non-zero value):
+  * ALL GraphQL queries MUST include the blockHeight parameter
+  * Set blockHeight to the CURRENT BLOCK HEIGHT value
+  * This ensures queries return data at the specified block state
+  
+  {example}
+
+- IF CURRENT BLOCK HEIGHT is 0 AND user didn't specify a block height:
+  * Do NOT add blockHeight parameter to queries
+  * Query normally without blockHeight
+    """
+
+def get_miner_self_tool_prompt(block_height: int = 0, node_type: str = "") -> str:
+    return f"""
 You are an assistant that can use tools to answer questions.
 Rules:
 1. Always use the relevant tool(s) first before generating any direct answer.
 2. If you cannot answer a question with any available tool, you must call the 'call_graphql_agent' tool as a fallback.
 3. When calling 'call_graphql_agent', respond with an empty string ("") as content. Do not add any text, explanation, or formatting.
 
-🚨 CRITICAL BLOCK HEIGHT RULE:
-- CURRENT BLOCK HEIGHT: ##{block_height}##
-- IF CURRENT BLOCK HEIGHT is NOT 0 (non-zero value):
-  * ALL GraphQL queries MUST include the blockHeight parameter
-  * Set blockHeight to the CURRENT BLOCK HEIGHT value
-  * This ensures queries return data at the specified block state
-  
-  {example}
+{get_block_rule_prompt(block_height, node_type)}
 
 Follow these rules strictly and do not deviate.
 """

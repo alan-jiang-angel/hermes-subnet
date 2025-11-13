@@ -23,7 +23,6 @@ async def verify_signature(request: Request):
         raise HTTPException(status_code=400, detail="Missing required signature headers")
 
     try:
-
         body = await request.body()
         body_hash = f"{sha256(body).hexdigest()}"
         logger.info(f"[API] Incoming request body sha256: {body_hash}, signature: {signature}, signed_by: {signed_by}, time_stamp: {time_stamp}")

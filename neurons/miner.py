@@ -205,7 +205,7 @@ class Miner(BaseNeuron):
             type = 1
             is_synthetic = False
             phase = Phase.MINER_ORGANIC
-            messages = task.to_messages()
+            messages = [SystemMessage(content=get_miner_self_tool_prompt(block_height=task.block_height, node_type=graphql_agent.config.node_type if graphql_agent else "unknown"))] + task.to_messages()
 
         tool_hit = []
         graphql_agent_inner_tool_calls = []
@@ -225,6 +225,7 @@ class Miner(BaseNeuron):
             else:
                 r = await graph.ainvoke({"messages": messages, "block_height": task.block_height})
 
+                # logger.info(f"[{tag}] - {task.id} Agent response: {r}")
                 usage_info = self.token_usage_metrics.append(cid_hash, phase, r)
 
                 # check tool stats

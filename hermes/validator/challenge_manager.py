@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from neurons.validator import Validator
 from agent.stats import Phase, TokenUsageMetrics
 from common.agent_manager import AgentManager
-from common.errors import ErrorCode
+from common.enums import ChallengeType, ErrorCode
 from common.protocol import SyntheticNonStreamSynapse
 from common.settings import Settings
 from common.table_formatter import table_formatter
@@ -177,7 +177,7 @@ class ChallengeManager:
                 for uid, miner_info in self.miners_dict.items():
                     miner_uids.append(uid)
                     miner_hotkeys.append(miner_info["hotkey"])
-                
+
                 uids = []
                 hotkeys = []
                 for idx, u in enumerate(miner_uids):
@@ -297,19 +297,31 @@ class ChallengeManager:
                         uid=self.V.uid,
                         address=self.settings.wallet.hotkey.ss58_address,
                         cid=cid_hash.split('_')[0],
+                        challenge_type=ChallengeType.SYNTHETIC.value,
                         challenge_id=challenge_id,
                         question=question,
+                        ground_truth=ground_truth[:500] if ground_truth else None,
                         ground_cost=ground_cost,
                         ground_truth_tools=[json.loads(t) for t in metrics_data.get("tool_calls", [])],
+                        ground_input_tokens=metrics_data.get("input_tokens", 0),
+                        ground_input_cache_read_tokens=metrics_data.get("input_cache_read_tokens", 0),
+                        ground_output_tokens=metrics_data.get("output_tokens", 0),
+                        
                         miners_answer=[
                             {
                                 "uid": uid,
                                 "address": hotkey,
                                 "elapsed": elapse_time,
-                                "truth_score": truth_score,
-                                "usage_info": resp.usage_info,
-                                "graphql_agent_inner_tool_calls": resp.graphql_agent_inner_tool_calls,
-                            } 
+                                "truthScore": truth_score,
+                                "statusCode": resp.status_code,
+                                "error": resp.error,
+                                "answer": resp.response[:500] if resp.response else None,
+                                "inputTokens": resp.usage_info.get("input_tokens", 0),
+                                "inputCacheReadTokens": resp.usage_info.get("input_cache_read_tokens", 0),
+                                "outputTokens": resp.usage_info.get("output_tokens", 0),
+                                "toolCalls": [json.loads(t) for t in resp.usage_info.get("tool_calls", [])],
+                                "graphqlAgentInnerToolCalls": [json.loads(t) for t in resp.graphql_agent_inner_tool_calls],
+                            }
                             for uid, hotkey, elapse_time, truth_score, resp in zip(uids, hotkeys, miners_elapse_time, ground_truth_scores, responses)
                         ],
                     )

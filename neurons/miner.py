@@ -31,7 +31,7 @@ from common.prompt_template import get_miner_self_tool_prompt, fill_miner_self_t
 from langchain_core.messages import HumanMessage, SystemMessage
 from common.table_formatter import table_formatter
 from common.agent_manager import AgentManager
-from common.errors import ErrorCode
+from common.enums import ErrorCode
 from common.logger import HermesLogger
 from common.protocol import CapacitySynapse, OrganicNonStreamSynapse, OrganicStreamSynapse, StatsMiddleware, SyntheticNonStreamSynapse
 from common.sqlite_manager import SQLiteManager
@@ -183,9 +183,9 @@ class Miner(BaseNeuron):
 
     async def _handle_task(
             self,
-            task: SyntheticNonStreamSynapse | OrganicNonStreamSynapse | OrganicStreamSynapse,
+            task: SyntheticNonStreamSynapse | OrganicNonStreamSynapse,
             log: Logger,
-    ) -> SyntheticNonStreamSynapse | OrganicNonStreamSynapse | OrganicStreamSynapse:
+    ) -> SyntheticNonStreamSynapse | OrganicNonStreamSynapse:
         question = task.get_question()
 
         cid_hash = task.cid_hash
@@ -212,7 +212,7 @@ class Miner(BaseNeuron):
             raise ValueError("Unsupported task type")
 
         answer = None
-        usage_info = ''
+        usage_info = {}
         tool_hit = []
         graphql_agent_inner_tool_calls = []
         response = None
@@ -262,6 +262,8 @@ class Miner(BaseNeuron):
         task.response = response
         task.error = error
         task.status_code = status_code.value
+        task.usage_info = usage_info
+        task.graphql_agent_inner_tool_calls = graphql_agent_inner_tool_calls
 
         self.put_db(
             type=type,

@@ -30,7 +30,7 @@ import uvicorn
 from multiprocessing.synchronize import Event
 from common.meta_config import MetaConfig
 from common.table_formatter import table_formatter
-from common.errors import ErrorCode
+from common.enums import ErrorCode
 from common.logger import HermesLogger
 from common.protocol import CapacitySynapse, ChatCompletionRequest, OrganicNonStreamSynapse, OrganicStreamSynapse
 import common.utils as utils
@@ -167,10 +167,11 @@ class Validator(BaseNeuron):
                     timeout=30,
                 )
                 if r.is_success and r.response.get("role", "") == "miner":
+                    logger.debug(f"Checking uid: {uid} r.dendrite: {r.dendrite} r.axon: {r.axon}")
                     return {
                         "uid": uid,
                         "projects": r.response.get("capacity", {}).get("projects", []),
-                        "hotkey": r.dendrite.hotkey
+                        "hotkey": r.axon.hotkey
                     }
             except Exception:
                 return None
@@ -200,8 +201,6 @@ class Validator(BaseNeuron):
 
                 # Filter out None responses
                 responses = [res for res in responses if res is not None]
-                logger.debug(f"[CheckMiner] Miner availability responses: {responses}")
-
                 for r in responses:
                     miners_dict[r["uid"]] = {
                         "hotkey": r["hotkey"],

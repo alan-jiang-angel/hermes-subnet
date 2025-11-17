@@ -230,7 +230,7 @@ class AgentManager:
                     state: Union[list[AnyMessage], dict[str, Any], BaseModel],
                     messages_key: str = "messages",
                 ):
-                    if getattr(state, "error", None):
+                    if getattr(state, "error", None) is not None:
                         return "final"
             
                     if isinstance(state, list):
@@ -258,20 +258,21 @@ class AgentManager:
                     async def call_model_func(state: ExtendedMessagesState) -> int:
                         messages = state["messages"]
                         error = None
-                        logger.info(f" call_model - messages: {messages} ")
+                        response_messages = None
+                        # logger.info(f" call_model - messages: {messages} ")
                         try:
                             response_messages = await llm.ainvoke(messages)
-                            logger.info(f" call_model - response: {response_messages} ")
+                            # logger.info(f" call_model - response: {response_messages} ")
                         except Exception as e:
                             logger.error(f" call_model - error: {e} ")
                             # response_messages = AIMessage(content=f"Error invoking LLM: {e}")
                             error = str(e)
-                        return {"messages": messages, "error": error}
+                        return {"messages": [response_messages] if error is None else messages, "error": error}
                     return call_model_func
 
                 def make_final_node():
                     async def final_func(state: ExtendedMessagesState) -> int:
-                        messages = state["messages"]
+                        # messages = state["messages"]
                         # logger.info(f" final - state: {state} ")
                         return state
                     return final_func

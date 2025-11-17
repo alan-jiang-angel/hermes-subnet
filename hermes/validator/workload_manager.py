@@ -11,6 +11,7 @@ from loguru import logger
 from typing import TYPE_CHECKING
 import torch
 from agent.stats import TokenUsageMetrics
+from common.enums import ChallengeType
 from common.table_formatter import table_formatter
 import common.utils as utils
 from common.protocol import OrganicNonStreamSynapse
@@ -273,18 +274,30 @@ class WorkloadManager:
                             address=self.V.settings.wallet.hotkey.ss58_address,
                             cid=response.cid_hash.split('_')[0],
                             challenge_id=response.id,
+                            challenge_type=ChallengeType.ORGANIC_STREAM.value,
                             question=response.get_question(),
+                            ground_truth=ground_truth[:500] if ground_truth else None,
                             ground_cost=ground_cost,
                             ground_truth_tools=[json.loads(t) for t in metrics_data.get("tool_calls", [])],
+                            ground_input_tokens=metrics_data.get("input_tokens", 0),
+                            ground_input_cache_read_tokens=metrics_data.get("input_cache_read_tokens", 0),
+                            ground_output_tokens=metrics_data.get("output_tokens", 0),
+
                             miners_answer=[
                             {
                                 "uid": uid,
                                 "address": hotkey,
                                 "elapsed": elapse_time,
-                                "truth_score": truth_score,
-                                "usage_info": resp.usage_info,
-                                "graphql_agent_inner_tool_calls": resp.graphql_agent_inner_tool_calls,
-                            } 
+                                "truthScore": truth_score,
+                                "statusCode": resp.status_code,
+                                "error": resp.error,
+                                "answer": resp.response[:500] if resp.response and resp.status_code == 200 else None,
+                                "inputTokens": resp.usage_info.get("input_tokens", 0),
+                                "inputCacheReadTokens": resp.usage_info.get("input_cache_read_tokens", 0),
+                                "outputTokens": resp.usage_info.get("output_tokens", 0),
+                                "toolCalls": [json.loads(t) for t in resp.usage_info.get("tool_calls", [])],
+                                "graphqlAgentInnerToolCalls": [json.loads(t) for t in resp.graphql_agent_inner_tool_calls],
+                            }
                             for uid, hotkey, elapse_time, truth_score, resp in zip([miner_uid], [hotkey], miners_elapse_time, ground_truth_scores, [response])
                         ],
                     )

@@ -2,7 +2,7 @@ from rich.console import Console
 from rich.box import ROUNDED
 from rich.table import Table
 from loguru import logger
-from common.errors import ErrorCode
+from common.enums import ErrorCode
 from common.protocol import OrganicNonStreamSynapse
 
 

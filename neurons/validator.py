@@ -284,13 +284,11 @@ class Validator(BaseNeuron):
                             yield f"{formatted_chunk}"
                     
                     if final_synapse:
-                        final_synapse.response = getattr(final_synapse, '_buffer', '')
-                        final_synapse.elapsed_time = utils.fix_float(time.perf_counter() - before)
-
+                        final_synapse.elapsed_time = final_synapse.elapsed_time or utils.fix_float(time.perf_counter() - before)
                         if final_synapse.status_code == 200 and len(self.organic_score_queue) < 1000:
                             self.organic_score_queue.append((
                                 miner_uid,
-                                self.settings.metagraph.axons[miner_uid].hotkey,
+                                final_synapse.hotkey or self.settings.metagraph.axons[miner_uid].hotkey,
                                 {
                                     "id": synapse.id,
                                     "cid_hash": synapse.cid_hash,
@@ -300,6 +298,12 @@ class Validator(BaseNeuron):
                                     "status_code": final_synapse.status_code,
                                     "error": final_synapse.error,
                                     "elapsed_time": final_synapse.elapsed_time,
+                                    "usage_info": final_synapse.usage_info,
+                                    "graphql_agent_inner_tool_calls": final_synapse.graphql_agent_inner_tool_calls,
+                                    "dendrite": {
+                                        "status_code": final_synapse.dendrite.status_code,
+                                        "status_message": final_synapse.dendrite.status_message,
+                                    }
                                 }
                             ))
                         else:

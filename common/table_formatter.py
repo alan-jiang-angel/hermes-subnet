@@ -257,7 +257,13 @@ class TableFormatter:
         rows = []
         for idx, uid in enumerate(uids):
             r = responses[idx]
-            rstr = r.response
+            if r.is_success:
+                if r.status_code == ErrorCode.SUCCESS.value:
+                    rstr = f"{r.response}"
+                else:
+                    rstr = f"⚠️ {r.status_code}: {r.error}"
+            else:
+                rstr = f"⚠️ {r.dendrite.status_code}"
                     
             # uid_hotkey = f"{uid}|{r.dendrite.hotkey}" if getattr(r.dendrite, 'hotkey', None) else f"{uid}"
             rows.append([

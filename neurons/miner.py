@@ -236,7 +236,7 @@ class Miner(BaseNeuron):
                     response,
                     error,
                     status_code
-                ) = self.get_answer(tag, phase, task, r)
+                ) = self.get_answer(phase, task, r)
 
         except Exception as e:
             log.error(f"handle task error {task.id} - {question}. {e}\n")
@@ -277,11 +277,10 @@ class Miner(BaseNeuron):
 
     def get_answer(
         self,
-        tag: str,
         phase: Phase,
         task: SyntheticNonStreamSynapse | OrganicNonStreamSynapse | OrganicStreamSynapse,
         r: dict
-    ) -> tuple[str | None, dict, list, list, str | None, str | None, ErrorCode]:
+    ) -> tuple[str | None, dict, list, list[str], str | None, str | None, ErrorCode]:
         # logger.info(f"[{tag}] - {task.id} Agent response: {r}")
 
         usage_info = self.token_usage_metrics.append(task.cid_hash, phase, r)
@@ -294,19 +293,22 @@ class Miner(BaseNeuron):
         if r.get('graphql_agent_hit', False):
             tool_hit.append(("graphql_agent_tool", 1))
 
-        graphql_agent_inner_tool_calls = r.get('tool_calls', [])
+        graphql_agent_inner_tool_calls: list[str] = r.get('tool_calls', [])
 
         error = None
         status_code = ErrorCode.SUCCESS
 
-        answer = r.get('messages')[-1].content or None
-        if not answer:
-            error = utils.try_get_invalid_tool_messages(r.get('messages', []))
-            status_code = ErrorCode.TOOL_ERROR if error is not None else status_code
+        answer = None
+        if r.get('error', None) is not None:
+            error = r.get('error')
+            status_code = ErrorCode.LLM_ERROR
+        else:
+            answer = r.get('messages')[-1].content or None
+            if not answer:
+                error = utils.try_get_invalid_tool_messages(r.get('messages', []))
+                status_code = ErrorCode.TOOL_ERROR if error is not None else status_code
 
-        response = None
-        if status_code == ErrorCode.SUCCESS:
-            response = answer
+        response = answer if status_code == ErrorCode.SUCCESS else None
         
         return answer, usage_info, tool_hit, graphql_agent_inner_tool_calls, response, error, status_code
         
@@ -388,12 +390,14 @@ class Miner(BaseNeuron):
         if not graph:
             error_msg = f"Error: No agent found for project {synapse.cid_hash}"
             log.warning(f"[Miner] - {synapse.id} {error_msg}")
-            
             async def error_streamer(send: Send):
-                """Send error message as streaming response."""
+                error_line = json.dumps({
+                    "type": "data",
+                    "data": error_msg
+                }) + "\n"
                 await send({
                     "type": "http.response.body",
-                    "body": error_msg.encode('utf-8'),
+                    "body": error_line.encode('utf-8'),
                     "more_body": False
                 })
             
@@ -417,22 +421,25 @@ class Miner(BaseNeuron):
                     if key == "final":
                         r = value
                         message = value.get("messages", [])[-1].content
+
+                        if r.get('error', None) is not None:
+                            message = r.get('error')
                         idx = 0
                         while idx < len(message):
                             chunk = message[idx:idx+10]
+                            # Send data chunks in JSONL format
+                            data_line = json.dumps({
+                                "type": "data",
+                                "data": chunk
+                            }) + "\n"
                             await send({
                                 "type": "http.response.body",
-                                "body": chunk.encode('utf-8'),
+                                "body": data_line.encode('utf-8'),
                                 "more_body": True
                             })
                             await asyncio.sleep(0.25)
                             idx += 10
                 
-            await send({
-                "type": "http.response.body",
-                "body": b"",
-                "more_body": False
-            })
             elapsed = utils.fix_float(time.perf_counter() - before)
             synapse.elapsed_time = elapsed
             (
@@ -443,7 +450,25 @@ class Miner(BaseNeuron):
                 response,
                 error,
                 status_code
-            ) = self.get_answer(tag, phase, synapse, r)
+            ) = self.get_answer(phase, synapse, r)
+
+            # Send metadata in JSONL format
+            metadata_line = json.dumps({
+                "type": "meta",
+                "data": {
+                    "elapsed": elapsed,
+                    "status_code": status_code.value,
+                    "error": error,
+                    "graphql_agent_inner_tool_calls": graphql_agent_inner_tool_calls,
+                    "usage_info": usage_info
+                }
+            }) + "\n"
+            await send({
+                "type": "http.response.body",
+                "body": metadata_line.encode('utf-8'),
+                "more_body": False
+            })
+
             self.print_table(
                 answer=answer,
                 usage_info=usage_info,

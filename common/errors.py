@@ -20,6 +20,7 @@ class ErrorCode(Enum):
     GATEWAY_TIMEOUT = 504
     
     TOOL_ERROR = 1001
+    LLM_ERROR = 1002
 
     ## ============ miner side error ============
     AGENT_NOT_FOUND = 2001

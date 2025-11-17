@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+import json
 import os
 from pathlib import Path
 import time
@@ -13,8 +14,10 @@ from agent.stats import TokenUsageMetrics
 from common.table_formatter import table_formatter
 import common.utils as utils
 from common.protocol import OrganicNonStreamSynapse
+from hermes.validator.benchmark import BenchMark
 if TYPE_CHECKING:
     from hermes.validator.challenge_manager import ChallengeManager
+    from neurons.validator import Validator
 
 class BucketCounter:
     def __init__(self, uid: int, hotkey: str, window_hours=3):
@@ -92,11 +95,15 @@ class WorkloadManager:
         work_state_path: str | Path = None,
         token_usage_metrics: TokenUsageMetrics = None,
         meta_config: dict = {},
+        benchmark: BenchMark = None,
+        v: "Validator" = None,
     ):
         self.challenge_manager = challenge_manager
         self.organic_score_queue = organic_score_queue
         self.token_usage_metrics = token_usage_metrics
         self.meta_config = meta_config
+        self.benchmark = benchmark
+        self.V = v
 
         self.uid_sample_scores = {}
         # self.uid_organic_workload_counter = defaultdict(BucketCounter)
@@ -220,12 +227,12 @@ class WorkloadManager:
                             logger.debug(f"[WorkloadManager] Skipping organic task computation for miner: {miner_uid} at count {miner_uid_work_load}")
                             continue
 
-                        q = response.completion.messages[-1].content
-                        logger.info(f"[WorkloadManager] compute organic task({response.id}) for miner: {miner_uid}, response: {response}. question: {q}")
+                        question = response.get_question()
+                        logger.info(f"[WorkloadManager] compute organic task({response.id}) for miner: {miner_uid}, response: {response}. question: {question}")
 
                         success, ground_truth, ground_cost, metrics_data = await self.challenge_manager.generate_ground_truth(
                             cid_hash=response.cid_hash,
-                            question=response.get_question(),
+                            question=question,
                             token_usage_metrics=self.token_usage_metrics,
                             round_id=f"Organic-{self.round_id}",
                             block_height=response.block_height
@@ -260,6 +267,27 @@ class WorkloadManager:
                             zip_scores=zip_scores,
                             cid=response.cid_hash
                         )
+
+                        await self.benchmark.upload(
+                            uid=self.V.uid,
+                            address=self.V.settings.wallet.hotkey.ss58_address,
+                            cid=response.cid_hash.split('_')[0],
+                            challenge_id=response.id,
+                            question=response.get_question(),
+                            ground_cost=ground_cost,
+                            ground_truth_tools=[json.loads(t) for t in metrics_data.get("tool_calls", [])],
+                            miners_answer=[
+                            {
+                                "uid": uid,
+                                "address": hotkey,
+                                "elapsed": elapse_time,
+                                "truth_score": truth_score,
+                                "usage_info": resp.usage_info,
+                                "graphql_agent_inner_tool_calls": resp.graphql_agent_inner_tool_calls,
+                            } 
+                            for uid, hotkey, elapse_time, truth_score, resp in zip([miner_uid], [hotkey], miners_elapse_time, ground_truth_scores, [response])
+                        ],
+                    )
 
                         if miner_uid not in self.uid_sample_scores:
                             self.uid_sample_scores[miner_uid] = deque(maxlen=20)

@@ -183,28 +183,37 @@ class AgentManager:
                             SystemMessage(content=get_block_rule_prompt(block_height, agent.config.node_type))
                         ] + human_messages
 
-                        response = await agent.executor.ainvoke(
-                            {"messages": msgs},
-                            config={
-                                "recursion_limit": 12,
-                                "configurable": {
-                                    "block_height": block_height,
-                                }
-                            },
-                            prompt_cache_key=f"{agent.config.cid_hash}_{time.perf_counter()}"
-                        )
-                        if enable_log:
-                            logger.info(f" --------call_graphql_agent------ response: {response} ")
+                        input_token_usage, input_cache_read_token_usage, output_token_usage = 0, 0, 0
+                        tool_calls = []
+                        error = None
+                        try:
+                            response = await agent.executor.ainvoke(
+                                {"messages": msgs},
+                                config={
+                                        "recursion_limit": 12,
+                                        "configurable": {
+                                        "block_height": block_height,
+                                    }
+                                },
+                                prompt_cache_key=f"{agent.config.cid_hash}_{time.perf_counter()}"
+                            )
+                            if enable_log:
+                                logger.info(f" --------call_graphql_agent------ response: {response} ")
                         
-                        last = response['messages'][-1]
-                        input_token_usage, input_cache_read_token_usage, output_token_usage = utils.extract_token_usage(response['messages'][0: -1])
+                            last = response['messages'][-1]
+                            input_token_usage, input_cache_read_token_usage, output_token_usage = utils.extract_token_usage(response['messages'][0: -1])
 
-                        tool_calls = utils.extract_tool_calls(response['messages'])
+                            tool_calls = utils.extract_tool_calls(response['messages'])
 
-                        if not last.content:
-                            error_msg = utils.try_get_invalid_tool_messages(last)
-                            if error_msg:
-                                last.content = error_msg
+                            if not last.content:
+                                error_msg = utils.try_get_invalid_tool_messages(last)
+                                if error_msg:
+                                    last.content = error_msg
+
+                        except Exception as e:
+                            error = str(e)
+                            logger.error(f" call_graphql_agent - error: {e} ")
+                            last = AIMessage(content=f"Error invoking GraphQL Agent: {e}")
 
                         return {
                                 "messages": [last], 
@@ -213,6 +222,7 @@ class AgentManager:
                                 "intermediate_graphql_agent_output_token_usage": output_token_usage,
                                 "graphql_agent_hit": True,
                                 "tool_calls": tool_calls,
+                                "error": error
                             }
                     return call_graphql_agent
 
@@ -220,7 +230,7 @@ class AgentManager:
                     state: Union[list[AnyMessage], dict[str, Any], BaseModel],
                     messages_key: str = "messages",
                 ):
-                    if getattr(state, "errored", False):
+                    if getattr(state, "error", None):
                         return "final"
             
                     if isinstance(state, list):
@@ -247,16 +257,16 @@ class AgentManager:
                 def make_call_model(llm: ChatOpenAI):
                     async def call_model_func(state: ExtendedMessagesState) -> int:
                         messages = state["messages"]
-                        errored = False
+                        error = None
                         logger.info(f" call_model - messages: {messages} ")
                         try:
                             response_messages = await llm.ainvoke(messages)
                             logger.info(f" call_model - response: {response_messages} ")
                         except Exception as e:
                             logger.error(f" call_model - error: {e} ")
-                            response_messages = AIMessage(content=f"Error invoking LLM: {e}")
-                            errored = True
-                        return {"messages": [response_messages], "errored": errored}
+                            # response_messages = AIMessage(content=f"Error invoking LLM: {e}")
+                            error = str(e)
+                        return {"messages": messages, "error": error}
                     return call_model_func
 
                 def make_final_node():

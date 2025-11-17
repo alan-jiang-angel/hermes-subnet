@@ -32,18 +32,18 @@ class CapacitySynapse(bt.Synapse):
 class BaseSynapse(bt.Synapse):
     id: str | None = None
     cid_hash: str | None = None
+    block_height: int | None = 0
+
     status_code: int | None = 200
     error: str | None = None
     elapsed_time: float | None = 0.0
-    block_height: int | None = 0
+
+    response: str | None = ''
+    usage_info: dict | None = None
+    graphql_agent_inner_tool_calls: list[str] | None = None
 
 class CompletionMessagesMixin:
     """Mixin class for synapses that contain ChatCompletionRequest with messages."""
-    
-    id: str | None = None
-    cid_hash: str | None = None
-    block_height: int | None = 0
-    elapsed_time: float | None = 0.0
     completion: ChatCompletionRequest | None = None
     
     def to_messages(self) -> list[AnyMessage]:
@@ -71,39 +71,112 @@ class CompletionMessagesMixin:
 
 class SyntheticNonStreamSynapse(BaseSynapse):
     question: str | None = None
-    response: str | None = ''
 
     def get_question(self):
         return self.question
 
+class OrganicNonStreamSynapse(CompletionMessagesMixin, BaseSynapse):
+    pass
+
 class OrganicStreamSynapse(CompletionMessagesMixin, bt.StreamingSynapse):
+    id: str | None = None
+    cid_hash: str | None = None
+    block_height: int | None = 0
+    
+    hotkey: str | None = None
     status_code: int | None = 200
     error: str | None = None
-    response: str | None = None
+    elapsed_time: float | None = 0.0
 
+    response: str | None = ''
+    usage_info: dict | None = None
+    graphql_agent_inner_tool_calls: list[str] | None = None
+    
     async def process_streaming_response(self, clientResponse: "ClientResponse"):
-        # logger.info(f"Processing streaming response: {clientResponse}")
         # logger.info(f"Streaming response success: {clientResponse.ok}, status={clientResponse.status}")
+        # logger.info(f"Response headers: {clientResponse.headers}")
 
-        axon_status_code = clientResponse.headers.get('bt_header_axon_status_code', '200')
-        self.status_code = axon_status_code
+        ok: bool = clientResponse.ok
+        status: int = clientResponse.status
+        axon_status_code: int = int(clientResponse.headers.get('bt_header_axon_status_code', '500'))
 
         buffer = ""
+        response_content = ""
+        
         async for chunk in clientResponse.content.iter_any():
             text = chunk.decode("utf-8", errors="ignore")
             buffer += text
-            # logger.info(f"Streaming response part: {text}")
-            yield text
-        self._buffer = buffer
+
+            if not ok or status < 200 or status >= 300:
+                continue
+
+            # Process complete JSON lines (JSONL format - one JSON per line)
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.strip()
+                
+                if not line:
+                    continue
+                
+                try:
+                    # Parse the complete JSON line
+                    obj = json.loads(line)
+                    line_type = obj.get("type")
+                    
+                    if line_type == "data":
+                        data_chunk = obj.get("data", "")
+                        response_content += data_chunk
+                        # logger.info(f"Streaming response part: {data_chunk}")
+                        yield data_chunk
+                    elif line_type == "meta":
+                        metadata = obj.get("data", {})
+                        self.elapsed_time = metadata.get("elapsed")
+                        self.status_code = metadata.get("status_code")
+                        self.error = metadata.get("error")
+                        self.graphql_agent_inner_tool_calls = metadata.get("graphql_agent_inner_tool_calls")
+                        self.usage_info = metadata.get("usage_info")
+                        # logger.info(f"Received metadata: {metadata}")
+                        
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse JSON line: {line[:100]}... Error: {e}")
+                    continue
+        
+        # Handle any remaining buffer content (shouldn't happen in normal case)
+        if buffer.strip():
+            logger.warning(f"Remaining buffer content after processing: {buffer}")
+        
+        self.hotkey = clientResponse.headers.get('bt_header_axon_hotkey', None)
+
+        if not ok or status < 200 or status >= 300:
+            reason = getattr(clientResponse, 'reason', 'Unknown')
+            self.status_code = status
+            self.error = f"HTTP error {status}: {reason}. {buffer}"
+            self._buffer = buffer
+        elif axon_status_code < 200 or axon_status_code >= 300:
+            bt_header_axon_status_message = clientResponse.headers.get('bt_header_axon_status_message', 'Unknown Axon Error')
+            self.status_code = axon_status_code
+            self.error = f"Axon error {axon_status_code}: {bt_header_axon_status_message}. {buffer}"
+            self._buffer = buffer
+        else:
+            self._buffer = response_content
 
     def extract_response_json(self, r: "ClientResponse") -> dict:
-        return {}
+        return {
+            "hotkey": self.hotkey,
+            "elapsed_time": self.elapsed_time,
+            "status_code": self.status_code,
+            "error": self.error,
+            "response": self._buffer,
+            "usage_info": self.usage_info,
+            "graphql_agent_inner_tool_calls": self.graphql_agent_inner_tool_calls,
+            "dendrite": {
+                "status_code": int(r.headers.get('bt_header_axon_status_code', '500')),
+                "status_message": r.headers.get('bt_header_axon_status_message', ''),
+            }
+        }
     
     def deserialize(self):
         return ''
-
-class OrganicNonStreamSynapse(CompletionMessagesMixin, BaseSynapse):
-    response: str | None = ''
 
 class StatsMiddleware(BaseHTTPMiddleware):
     def __init__(
@@ -167,7 +240,7 @@ class StatsMiddleware(BaseHTTPMiddleware):
             return self.handle_token_stats(request.query_params.get("latest", "2h"))
         return await call_next(request)
 class ExtendedMessagesState(MessagesState):
-    errored: bool = False
+    error: str | None = None
     graphql_agent_hit: bool
     intermediate_graphql_agent_input_token_usage: int
     intermediate_graphql_agent_input_cache_read_token_usage: int

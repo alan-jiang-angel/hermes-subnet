@@ -78,6 +78,7 @@ class ChallengeManager:
         self.round_id = 1
         self.dendrite = dendrite
         self.token_usage_metrics = TokenUsageMetrics(datas=synthetic_token_usage)
+        self.benchmark = BenchMark(self.settings.wallet, meta_config)
 
         synthetic_model_name = synthetic_model_name or os.getenv("LLM_MODEL", "gpt-5")
         self.llm_synthetic = ChatOpenAI(
@@ -107,7 +108,9 @@ class ChallengeManager:
             organic_score_queue=organic_score_queue,
             work_state_path=Path(self.settings.base_dir) / ".data" / f"{v.role}_workload_state.pt",
             token_usage_metrics=self.token_usage_metrics,
-            meta_config=meta_config or {}
+            meta_config=meta_config or {},
+            benchmark=self.benchmark,
+            v=v,
         )
 
         self.synthetic_score = synthetic_score
@@ -160,7 +163,6 @@ class ChallengeManager:
     async def challenge_loop(self):
         try:
             block_cache: dict[str, int] = {}
-            benchmark = BenchMark(self.settings.wallet, self.meta_config)
             while not self.event_stop.is_set():
                 await asyncio.sleep(self.challenge_interval)
 
@@ -291,7 +293,7 @@ class ChallengeManager:
                     )
                     project_score_matrix.append(zip_scores)
 
-                    await benchmark.upload(
+                    await self.benchmark.upload(
                         uid=self.V.uid,
                         address=self.settings.wallet.hotkey.ss58_address,
                         cid=cid_hash.split('_')[0],
@@ -300,8 +302,15 @@ class ChallengeManager:
                         ground_cost=ground_cost,
                         ground_truth_tools=[json.loads(t) for t in metrics_data.get("tool_calls", [])],
                         miners_answer=[
-                            {"uid": uid, "address": hotkey, "elapsed": elapse_time, "truth_score": truth_score} 
-                            for uid, hotkey, elapse_time, truth_score in zip(uids, hotkeys, miners_elapse_time, ground_truth_scores)
+                            {
+                                "uid": uid,
+                                "address": hotkey,
+                                "elapsed": elapse_time,
+                                "truth_score": truth_score,
+                                "usage_info": resp.usage_info,
+                                "graphql_agent_inner_tool_calls": resp.graphql_agent_inner_tool_calls,
+                            } 
+                            for uid, hotkey, elapse_time, truth_score, resp in zip(uids, hotkeys, miners_elapse_time, ground_truth_scores, responses)
                         ],
                     )
 

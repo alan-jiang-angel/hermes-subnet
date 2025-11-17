@@ -58,7 +58,8 @@ class ScorerManager:
             token_usage_metrics: TokenUsageMetrics | None = None,
             round_id: int = 0
         ):
-        if not miner_synapse.response:
+        if not miner_synapse.response or miner_synapse.status_code != 200:
+            logger.warning(f"[ScorerManager] - cal_ground_truth_score: empty or error response from miner_synapse, status_code: {miner_synapse.status_code}, response: {miner_synapse.response}")
             return 0.0
         
         # SECURITY: Sanitize miner response to detect/log prompt injection attempts

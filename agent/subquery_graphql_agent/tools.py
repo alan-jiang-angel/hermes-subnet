@@ -2,7 +2,7 @@
 
 import json
 import asyncio
-from typing import Optional, Type, Dict, Any, Annotated
+from typing import Optional, Type, Dict, Any, Annotated, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict
 from loguru import logger
 import graphql
@@ -10,6 +10,9 @@ from graphql import build_client_schema, validate
 from langchain_core.tools import BaseTool, InjectedToolArg
 from langchain_core.runnables import RunnableConfig
 from langchain_core.callbacks import CallbackManagerForToolRun, AsyncCallbackManagerForToolRun
+
+if TYPE_CHECKING:
+    from agent.subquery_graphql_agent.base import GraphQLSource
 
 from .graphql import process_graphql_schema
 from .node_types import GraphqlProvider
@@ -467,6 +470,7 @@ def create_system_prompt(
     domain_capabilities: list,
     decline_message: str,
     is_synthetic: bool = False,
+    extra_instructions: str | None = None,
 ) -> str:
     """
     Create a system prompt for langgraph GraphQL agent.
@@ -527,6 +531,8 @@ WORKFLOW:
 - If second query needs result from first → You MAY query twice (but minimize this)
 - NEVER query the same entity twice for different fields that could be fetched together
 - ALWAYS check if first query results already answer the question before querying again
+
+{extra_instructions if extra_instructions else ""}
 
 For missing user info (like "my rewards", "my tokens"), always ask for the specific wallet address or ID rather than fabricating data."""
     else:
@@ -767,7 +773,7 @@ class GraphQLQueryValidatorAndExecutedTool(BaseTool):
     """
     args_schema: Type[BaseModel] = GraphQLQueryValidatorInput
     
-    def __init__(self, graphql_source):
+    def __init__(self, graphql_source: "GraphQLSource"):
         super().__init__()
         self._graphql_source = graphql_source
     

@@ -184,7 +184,7 @@ class Validator(BaseNeuron):
                     if uid == self.uid:
                         continue
                     all_miner_uids.append(uid)
-                logger.debug(f"[CheckMiner] Current miners: {miners_dict}")
+                logger.debug(f"[CheckMiner] all_miner_uids: {all_miner_uids}, Current miners: {miners_dict}")
 
                 tasks = []
                 for uid in all_miner_uids:
@@ -219,8 +219,9 @@ class Validator(BaseNeuron):
         # Clean up resources before exiting
         await self.cleanup()
 
-    async def forward_miner(self, cid_hash: str, body: ChatCompletionRequest):
+    async def forward_miner(self, body: ChatCompletionRequest):
         now = int(time.time())
+        cid_hash = body.cid_hash
         block_height, last_acquired_timestamp, node_type, endpoint = self.block_cache.get(cid_hash, [0, 0, "", ""])
         if not block_height or abs(now - last_acquired_timestamp) > 3:
             if not endpoint:

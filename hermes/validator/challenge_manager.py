@@ -392,14 +392,18 @@ class ChallengeManager:
                 'What  is  the largest  number of liquidity providers any single trading pool currently has?',
                 'How  many  transactions has the exchange processed in total?',
                 'What  was  the exchange\'s total trading volume in USD for the most recent day?',
+                'what is the top trader wallet for token pair usdc/weth and how much it traded? and return the graphql query used'
             ]
             
             projects = self.agent_manager.get_projects()
 
             block_cache: dict[str, int] = {}
             for cid_hash, project_config in projects.items():
-                allowed_cid_hashs = os.getenv("ALLOWED_PROJECT_CID_HASHS", "").split(",")
-                if allowed_cid_hashs and cid_hash not in allowed_cid_hashs:
+                allowed_cid_hashs_str = os.getenv("ALLOWED_PROJECT_CID_HASHS", "").strip()
+                if allowed_cid_hashs_str:
+                    allowed_cid_hashs = allowed_cid_hashs_str.split(",")
+                    if cid_hash not in allowed_cid_hashs:
+                        logger.info(f"[ChallengeManager] - {cid_hash} Skipping project not in allowed list")
                         continue
                 
                 logger.info(f"start testing: {cid_hash}")
@@ -419,11 +423,16 @@ class ChallengeManager:
 
                     if latest_block is not None:
                         block_cache[cid_hash] = latest_block
-                    
+            
                     logger.info(f"[ChallengeManager] - {cid_hash} Selected block height: {block_cache[cid_hash]}")
 
-                    success, ground_truth, ground_cost, metrics_data = await self.generate_ground_truth(cid_hash, q, self.token_usage_metrics, round_id=self.round_id, block_height=block_cache[cid_hash])
-
+                    success, ground_truth, ground_cost, metrics_data, model_name = await self.generate_ground_truth(
+                        cid_hash=cid_hash,
+                        question=q,
+                        token_usage_metrics=self.token_usage_metrics,
+                        round_id=self.round_id,
+                        block_height=block_cache[cid_hash]
+                    )
                     is_valid = success and utils.is_ground_truth_valid(ground_truth)
 
                     # Create challenge table
@@ -447,7 +456,7 @@ class ChallengeManager:
                     total_input_cache_tokens += question_cache
                     total_output_tokens += question_output
 
-                    await asyncio.sleep(2)  # brief pause between questions
+                    await asyncio.sleep(30)  # brief pause between questions
 
                 # calculate total cost for the project
                 total_cost_info = utils.calculate_token_cost(
@@ -491,7 +500,7 @@ class ChallengeManager:
                 raise ValueError(f"No server agent found for cid: {cid_hash}")
 
             model_name = agent.llm.model_name
-            response = await agent.query_no_stream(
+            response, _, _ = await agent.query_no_stream(
                 question,
                 prompt_cache_key=f"{cid_hash}_{start_time}",
                 is_synthetic=True,
@@ -510,6 +519,10 @@ class ChallengeManager:
                 error = utils.try_get_invalid_tool_messages(response.get('messages', []))
                 if error:
                     raise RuntimeError(f"[ChallengeManager] - {cid_hash} Failed to generate ground truth. {error}")
+
+            # data = utils.form_training_data(question, block_height, response.get('messages', []), metrics_data)
+            # now = time.strftime("%Y-%m-%d", time.localtime())
+            # utils.append_to_jsonl(f"./.data/dataset_simple_{now}_IndexerAllocation.jsonl", data)
 
             success = True
 
@@ -617,6 +630,7 @@ class ChallengeManager:
         try:
             while not self.event_stop.is_set():
                 await asyncio.sleep(self.refresh_agents_interval)
+                self.settings.reread()
                 await self.agent_manager.start(pull=True, role="validator", silent=True)
         except Exception as e:
             logger.error(f"[ChallengeManager] refresh_agents error: {e}")

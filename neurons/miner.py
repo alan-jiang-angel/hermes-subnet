@@ -566,9 +566,11 @@ class Miner(BaseNeuron):
         silent = False
         while True:
             try:
+                self.settings.reread()
                 await self.agent_manager.start(mode == "pull", role="miner", silent=silent)
                 await asyncio.sleep(refresh_agents_interval)
                 silent = True
+                mode = 'pull'  # after first load, always pull updates
             except Exception as e:
                 logger.error(f"refresh_agents error: {e}")
 

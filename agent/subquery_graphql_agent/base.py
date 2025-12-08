@@ -77,10 +77,16 @@ class GraphQLSource:
         if (self._schema_cache is None or 
             current_time - self._schema_timestamp > self.schema_cache_ttl):
             
+            headers = {**self.headers}
+            if self.node_type == GraphqlProvider.THE_GRAPH:
+                thegraph_token = os.getenv("THEGRAPH_API_TOKEN")
+                if thegraph_token and "Authorization" not in headers:
+                    headers["Authorization"] = f"Bearer {thegraph_token}"
+                    logger.info("Added THEGRAPH_API_TOKEN to Authorization header to fetch schema")
             introspection_result = await fetch_graphql_schema(
                 self.endpoint, 
                 include_arg_descriptions=True,
-                headers=self.headers
+                headers=headers
             )
             self._schema_cache = introspection_result
             self._schema_timestamp = current_time
@@ -100,11 +106,21 @@ class GraphQLSource:
         if variables:
             payload["variables"] = variables
         
+        # Prepare headers
+        headers = {**self.headers, "Content-Type": "application/json"}
+        
+        # For The Graph projects, add API token from environment if available
+        if self.node_type == GraphqlProvider.THE_GRAPH:
+            thegraph_token = os.getenv("THEGRAPH_API_TOKEN")
+            if thegraph_token and "Authorization" not in headers:
+                headers["Authorization"] = f"Bearer {thegraph_token}"
+                logger.info("Added THEGRAPH_API_TOKEN to Authorization header to execute query")
+        
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 self.endpoint,
                 json=payload,
-                headers={**self.headers, "Content-Type": "application/json"}
+                headers=headers
             ) as response:
                 if response.status == 200:
                     return await response.json()
@@ -217,7 +233,8 @@ class GraphQLAgent:
         logger.info(f"Initializing GraphQLAgent with model: {model_name}")
         self.llm = ChatOpenAI(
             model=model_name,
-            temperature=0
+            temperature=0,
+            extra_body={"thinking": {"type": "disabled"}},
         )
 
         # Create tools with node type information and authorization header
@@ -260,6 +277,8 @@ class GraphQLAgent:
             is_synthetic: Whether this is a synthetic challenge (affects domain filtering behavior)
             block_height: The block height for time-travel queries
         """
+        block_rule = get_block_rule_prompt(block_height, self.config.node_type)
+
         # Create appropriate system prompt based on query type
         prompt = create_system_prompt(
             domain_name=self.config.domain_name,
@@ -278,19 +297,19 @@ class GraphQLAgent:
         response = await temp_executor.ainvoke(
             {
                 "messages": [
-                    {"role": "system", "content": get_block_rule_prompt(block_height, self.config.node_type)},
+                    {"role": "system", "content": block_rule},
                     {"role": "user", "content": question}
                 ],
             },
             config={
-                "recursion_limit": 12,
                 "configurable": {
+                    "recursion_limit": 12,
                     "block_height": block_height,
                 }
             },
             prompt_cache_key=prompt_cache_key
         )
-        return response
+        return response, prompt, block_rule
 
     async def query(self, messages: list, include_think: bool = False):
         """Streaming query using langgraph agent with conversation history support."""

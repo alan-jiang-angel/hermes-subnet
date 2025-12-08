@@ -14,12 +14,13 @@ class Settings:
     _wallet: bt.wallet | None = None
     _last_metagraph: Metagraph = None
     _last_update_time: int = 0
+    _env_file: str | None = None
 
-    @classmethod
-    def load_env_file(cls, role: str):
+    def load_env_file(self, role: str):
         env_file = f".env.{role}"
         try:
             dotenv.load_dotenv(env_file)
+            self._env_file = env_file
             logger.info(f"Loaded {env_file} file")
         except Exception as e:
             logger.error(f"Failed to load {env_file} file: {e}")
@@ -107,6 +108,22 @@ class Settings:
             uids.append(int(uid))
         hotkeys = [meta.hotkeys[u] for u in uids]
         return uids, hotkeys
+
+    def reread(self):
+        if self._env_file and os.path.exists(self._env_file):
+            try:
+                with open(self._env_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('THEGRAPH_API_TOKEN='):
+                            key, value = line.split('=', 1)
+                            old_value = os.environ.get(key)
+                            if old_value != value:
+                                os.environ[key] = value
+                                logger.info(f"Reloaded THEGRAPH_API_TOKEN from {self._env_file}")
+                            break
+            except Exception as e:
+                logger.error(f"Failed to reread THEGRAPH_API_TOKEN from {self._env_file}: {e}")
 
     def inspect(self):
         uids = self.metagraph.uids

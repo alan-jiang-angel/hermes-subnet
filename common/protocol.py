@@ -20,7 +20,8 @@ class ChatCompletionMessage(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     id: str = Field(default=None, description="Unique identifier for the request")
-    model: str = Field(default="gpt-4o-mini", description="Model to use")
+    model: Optional[str] = Field(default="gpt-4o-mini", description="Model to use")
+    cid_hash: str = Field(default="", description="CID associated with the request")
     messages: List[ChatCompletionMessage] = Field(..., description="List of messages")
     stream: bool = Field(default=False, description="Whether to stream responses")
     temperature: float = Field(default=0.0, description="Sampling temperature")

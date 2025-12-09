@@ -16,8 +16,8 @@ class Settings:
     _last_update_time: int = 0
     _env_file: str | None = None
 
-    def load_env_file(self, role: str):
-        env_file = f".env.{role}"
+    def load_env_file(self, role: str | None = None):
+        env_file = f".env.{role}" if role else ".env"
         try:
             dotenv.load_dotenv(env_file)
             self._env_file = env_file

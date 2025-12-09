@@ -269,7 +269,7 @@ class GraphQLAgent:
             prompt=prompt
         )
 
-    async def query_no_stream(self, question: str, prompt_cache_key: str = '', is_synthetic: bool = False, block_height: str = 0):
+    async def query_no_stream(self, question: str, prompt_cache_key: str = '', is_synthetic: bool = False, block_height: int = 0):
         """Execute a non-streaming query.
 
         Args:

@@ -95,6 +95,10 @@ class Settings:
     def base_dir(self) -> str:
         return os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 
+    @property
+    def env_file(self) -> str | None:
+        return self._env_file
+
     def miners(self) -> Tuple[List[int], List[str]]:
         uids = []
         meta = self.metagraph

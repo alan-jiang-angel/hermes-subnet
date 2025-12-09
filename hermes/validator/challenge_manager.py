@@ -63,6 +63,8 @@ class ChallengeManager:
         ipc_common_config: dict = None,
         event_stop: Event = None,
         synthetic_token_usage: list = None,
+        score_state_path: str | Path = None,
+        work_state_path: str | Path = None,
         v: "Validator" = None,
     ):
         self.settings = settings
@@ -100,13 +102,13 @@ class ChallengeManager:
 
         self.scorer_manager = ScorerManager(
             llm_score=self.llm_score,
-            score_state_path=Path(self.settings.base_dir) / ".data" / f"{v.role}_score_state.pt"
+            score_state_path=score_state_path
         )
 
         self.workload_manager = WorkloadManager(
             challenge_manager=self,
             organic_score_queue=organic_score_queue,
-            work_state_path=Path(self.settings.base_dir) / ".data" / f"{v.role}_workload_state.pt",
+            work_state_path=work_state_path,
             token_usage_metrics=self.token_usage_metrics,
             meta_config=meta_config or {},
             benchmark=self.benchmark,

@@ -99,6 +99,8 @@ class Validator(BaseNeuron):
             meta_config=meta_config,
             ipc_common_config=ipc_common_config,
             event_stop=event_stop,
+            score_state_path=Path(self.settings.base_dir) / ".data" / f"{self.role}_score_state.pt",
+            work_state_path=Path(self.settings.base_dir) / ".data" / f"{self.role}_workload_state.pt",
             v=self,
         )
         tasks = [

@@ -11,8 +11,7 @@ def create_thegraph_schema_info_content(schema_content: str) -> str:
     
     Args:
         schema_content: Raw GraphQL schema string
-        entities: List of entity names extracted from schema
-        relationships: Entity relationship mapping
+        block_height: Current block height for time-travel queries
         
     Returns:
         Formatted schema information string for The Graph

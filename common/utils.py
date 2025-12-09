@@ -235,6 +235,62 @@ def try_get_tool_hit(messages: list[BaseMessage], exclude_tools=[]) -> list[tupl
     tool_hit = [(name, tool_counts[name]) for name in tool_order]
     return tool_hit
 
+def form_training_data(question: str, block_height: int, response_messages: list[BaseMessage], metrics_data: dict) -> dict:
+    messages = [
+        {
+            "role": "system",
+            "content": "[SYS_PROMPT]"
+        },
+        {
+            "role": "system",
+            "content": "[BLOCK_RULE_PROMPT]"
+        },
+        {
+            "role": "user",
+            "content": question
+        },
+    ]
+    for msg in response_messages:
+        if msg.type == 'ai' and hasattr(msg, 'tool_calls') and len(msg.tool_calls) > 0:
+            first = msg.tool_calls[0]
+            name = first.get("name")
+            args = first.get("args")
+
+            if name == 'graphql_schema_info':
+                messages.append({
+                    "role": "assistant",
+                    "content": f"<tool name=\"{name}\">{json.dumps(args)}</tool>"
+                })
+            else:
+                messages.append({
+                    "role": "assistant",
+                    "content": f"<tool name=\"{name}\">{json.dumps(args)}</tool>"
+                })
+        elif msg.type == 'tool':
+            if msg.name == 'graphql_schema_info':
+                messages.append({
+                    "role": "tool",
+                    "content": "[SCHEMA_INFO]"
+                })
+            else:
+                messages.append({
+                    "role": "tool",
+                    "content": msg.content
+                })
+
+    
+    result = response_messages[-1].content
+
+    messages.append({
+        "role": "assistant",
+        "content": result
+    })
+
+    return {
+        "messages": messages,
+        "block_height": block_height,
+    }
+
 def format_openai_message(content: str, finish_reason=None) -> str:
     chunk_data = {
         "id": f"chatcmpl-{int(time.time())}",
@@ -388,6 +444,9 @@ def calculate_token_cost(
 
         # for fine tuning
         "gpt-4.1-mini": {"input": 0.80, "output": 3.20, "input_cache": 0.20},
+
+        "minimax/minimax-m2": {"input": 0.255, "output": 1.02, "input_cache": 0.0},
+
     }
     
     # Get pricing for the model, fallback to default if not found
@@ -467,7 +526,7 @@ def omit(obj: dict, keys: list) -> dict:
     
     return {key: value for key, value in obj.items() if key not in keys}
 
-async def getLatestBlock(endpoint: str, node_type: str) -> int | None:
+async def get_latest_block(endpoint: str, node_type: str) -> int | None:
     """
     Get the latest block height from a GraphQL endpoint.
     
@@ -606,41 +665,9 @@ if __name__ == "__main__":
 
 def append_to_jsonl(
     file_path: str,
-    instruction: str,
-    question: str,
-    schema: str,
-    ground_truth_tools: list[dict],
+    data: any,
 ) -> bool:
-    """
-    Append a training sample to JSONL file.
-    
-    Args:
-        file_path: Path to the JSONL file
-        instruction: The instruction/prompt text
-        question: The natural language question
-        schema: The GraphQL schema content
-        ground_truth_tools: List of tool calls (will filter out graphql_schema_info)
-        
-    Returns:
-        bool: True if successful, False otherwise
-    """
     try:
-        # Filter out graphql_schema_info tool calls
-        filtered_tools = [
-            tool for tool in ground_truth_tools 
-            if tool.get("name") != "graphql_schema_info"
-        ]
-        
-        # Create the data structure
-        data = {
-            "instruction": instruction,
-            "input": {
-                "natural_language": question,
-                "schema": schema
-            },
-            "output": filtered_tools
-        }
-        
         # Ensure directory exists
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         

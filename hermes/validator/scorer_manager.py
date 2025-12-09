@@ -58,15 +58,16 @@ class ScorerManager:
             token_usage_metrics: TokenUsageMetrics | None = None,
             round_id: int = 0
         ):
-        if not miner_synapse.response:
+        if not miner_synapse.response or miner_synapse.status_code != 200:
+            logger.warning(f"[ScorerManager] - cal_ground_truth_score: empty or error response from miner_synapse, status_code: {miner_synapse.status_code}, response: {miner_synapse.response}")
             return 0.0
         
         # SECURITY: Sanitize miner response to detect/log prompt injection attempts
-        sanitized_response = sanitize_for_evaluation(miner_synapse.response, max_length=5000)
+        # sanitized_response = sanitize_for_evaluation(miner_synapse.response, max_length=5000)
         
         question_prompt = SCORE_PROMPT.format(
             ground_truth=ground_truth, 
-            miner_answer=sanitized_response  # Use sanitized response
+            miner_answer=miner_synapse.response  # Use sanitized response
         )
         try :
             summary_response = await self.llm_score.ainvoke([HumanMessage(content=question_prompt)])
@@ -76,7 +77,7 @@ class ScorerManager:
         except Exception as e:
             logger.error(f"[ScorerManager] - LLM scoring error: {e}")
             return 0.0
-        return summary_response.content
+        return summary_response.content.strip() if summary_response.content else "0.0"
     
     def update_scores(self, 
         uids: List[int], 

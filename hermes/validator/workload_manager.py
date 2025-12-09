@@ -1,5 +1,6 @@
 import asyncio
 from collections import deque
+import json
 import os
 from pathlib import Path
 import time
@@ -10,10 +11,14 @@ from loguru import logger
 from typing import TYPE_CHECKING
 import torch
 from agent.stats import TokenUsageMetrics
+from common.enums import ChallengeType
+from common.table_formatter import table_formatter
 import common.utils as utils
 from common.protocol import OrganicNonStreamSynapse
+from hermes.validator.benchmark import BenchMark
 if TYPE_CHECKING:
     from hermes.validator.challenge_manager import ChallengeManager
+    from neurons.validator import Validator
 
 class BucketCounter:
     def __init__(self, uid: int, hotkey: str, window_hours=3):
@@ -89,11 +94,17 @@ class WorkloadManager:
         challenge_manager: "ChallengeManager", 
         organic_score_queue: list,
         work_state_path: str | Path = None,
-        token_usage_metrics: TokenUsageMetrics = None
+        token_usage_metrics: TokenUsageMetrics = None,
+        meta_config: dict = {},
+        benchmark: BenchMark = None,
+        v: "Validator" = None,
     ):
         self.challenge_manager = challenge_manager
         self.organic_score_queue = organic_score_queue
         self.token_usage_metrics = token_usage_metrics
+        self.meta_config = meta_config
+        self.benchmark = benchmark
+        self.V = v
 
         self.uid_sample_scores = {}
         # self.uid_organic_workload_counter = defaultdict(BucketCounter)
@@ -103,10 +114,11 @@ class WorkloadManager:
 
         self.organic_task_compute_interval = int(os.getenv("WORKLOAD_ORGANIC_TASK_COMPUTE_INTERVAL", 30))
         self.organic_task_concurrency = int(os.getenv("WORKLOAD_ORGANIC_TASK_CONCURRENCY", 5))
-        self.organic_task_sample_rate = int(os.getenv("WORKLOAD_ORGANIC_TASK_SAMPLE_RATE", 5))
+        self.organic_task_sample_rate = int(os.getenv("WORKLOAD_ORGANIC_TASK_SAMPLE_RATE", 1))
         self.organic_workload_counter_full_purge_interval = int(os.getenv("WORKLOAD_ORGANIC_WORKLOAD_COUNTER_FULL_PURGE_INTERVAL", 3600))
         self.work_state_path = work_state_path
         self.collect_count = 0
+        self.round_id = 1
         self.load_state()
 
     async def collect(self, uid: int, hotkey: str):
@@ -207,6 +219,8 @@ class WorkloadManager:
                     
                     if self.organic_score_queue:
                         miner_uid, hotkey, resp_dict = self.organic_score_queue.pop(0)
+
+                        logger.info(f"[WorkloadManager] Processing organic task for miner: {miner_uid}, resp_dict id: {resp_dict}")
                         response = OrganicNonStreamSynapse(**resp_dict)
 
                         miner_uid_work_load = await self.collect(miner_uid, hotkey)
@@ -214,11 +228,16 @@ class WorkloadManager:
                             logger.debug(f"[WorkloadManager] Skipping organic task computation for miner: {miner_uid} at count {miner_uid_work_load}")
                             continue
 
-                        q = response.completion.messages[-1].content
-                        logger.info(f"[WorkloadManager] compute organic task({response.id}) for miner: {miner_uid}, response: {response}. question: {q}")
+                        question = response.get_question()
+                        logger.info(f"[WorkloadManager] compute organic task({response.id}) for miner: {miner_uid}, response: {response}. question: {question}")
 
-                        success, ground_truth, ground_cost = await self.challenge_manager.generate_ground_truth(response.cid_hash, q)
-
+                        success, ground_truth, ground_cost, metrics_data, model_name = await self.challenge_manager.generate_ground_truth(
+                            cid_hash=response.cid_hash,
+                            question=question,
+                            token_usage_metrics=self.token_usage_metrics,
+                            round_id=f"Organic-{self.round_id}",
+                            block_height=response.block_height
+                        )
                         # Validate ground truth content
                         is_valid = success and utils.is_ground_truth_valid(ground_truth)
                         if not is_valid:
@@ -226,12 +245,69 @@ class WorkloadManager:
                             continue
 
                         logger.info(f"[WorkloadManager] Generated task({response.id}) ground truth: {ground_truth}, cost: {ground_cost}, miner.response: {response.response}")
-                        zip_scores, _, _ = await self.challenge_manager.scorer_manager.compute_challenge_score(
-                            ground_truth, 
-                            ground_cost, 
+
+                        zip_scores, ground_truth_scores, elapse_weights, miners_elapse_time = await self.challenge_manager.scorer_manager.compute_challenge_score(
+                            ground_truth,
+                            ground_cost,
                             [response],
-                            challenge_id=response.id
+                            challenge_id=response.id,
+                            cid_hash=response.cid_hash,
+                            token_usage_metrics=self.token_usage_metrics,
+                            min_latency_improvement_ratio=self.meta_config.get("min_latency_improvement_ratio", 0.2),
+                            round_id=f"Organic-{self.round_id}",
                         )
+
+                        table_formatter.create_workload_summary_table(
+                            round_id=self.round_id,
+                            challenge_id=response.id,
+                            ground_truth=ground_truth,
+                            uids=[miner_uid],
+                            responses=[response],
+                            ground_truth_scores=ground_truth_scores,
+                            elapse_weights=elapse_weights,
+                            zip_scores=zip_scores,
+                            cid=response.cid_hash
+                        )
+
+                        await self.benchmark.upload(
+                            uid=self.V.uid,
+                            address=self.V.settings.wallet.hotkey.ss58_address,
+                            cid=response.cid_hash.split('_')[0],
+                            challenge_id=response.id,
+                            challenge_type=ChallengeType.ORGANIC_STREAM.value,
+                            question=response.get_question(),
+
+                            question_generator_model_name='',
+                            ground_truth_model_name=model_name[:50],
+                            score_model_name=self.challenge_manager.scorer_manager.llm_score.model_name[:50],
+
+                            ground_truth=ground_truth[:500] if ground_truth else None,
+                            ground_cost=ground_cost,
+                            ground_truth_tools=[json.loads(t) for t in metrics_data.get("tool_calls", [])],
+                            ground_input_tokens=metrics_data.get("input_tokens", 0),
+                            ground_input_cache_read_tokens=metrics_data.get("input_cache_read_tokens", 0),
+                            ground_output_tokens=metrics_data.get("output_tokens", 0),
+
+                            miners_answer=[
+                            {
+                                "uid": uid,
+                                "address": hotkey,
+                                "minerModelName": resp.miner_model_name[:50],
+                                "graphqlAgentModelName": resp.graphql_agent_model_name[:50],
+                                "elapsed": elapse_time,
+                                "truthScore": truth_score,
+                                "statusCode": resp.status_code,
+                                "error": resp.error,
+                                "answer": resp.response[:500] if resp.response and resp.status_code == 200 else None,
+                                "inputTokens": resp.usage_info.get("input_tokens", 0),
+                                "inputCacheReadTokens": resp.usage_info.get("input_cache_read_tokens", 0),
+                                "outputTokens": resp.usage_info.get("output_tokens", 0),
+                                "toolCalls": [json.loads(t) for t in resp.usage_info.get("tool_calls", [])],
+                                "graphqlAgentInnerToolCalls": [json.loads(t) for t in resp.graphql_agent_inner_tool_calls],
+                            }
+                            for uid, hotkey, elapse_time, truth_score, resp in zip([miner_uid], [hotkey], miners_elapse_time, ground_truth_scores, [response])
+                        ],
+                    )
 
                         if miner_uid not in self.uid_sample_scores:
                             self.uid_sample_scores[miner_uid] = deque(maxlen=20)

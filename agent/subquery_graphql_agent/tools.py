@@ -2,13 +2,17 @@
 
 import json
 import asyncio
-from typing import Optional, Type, Dict, Any
+from typing import Optional, Type, Dict, Any, Annotated, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict
 from loguru import logger
 import graphql
 from graphql import build_client_schema, validate
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, InjectedToolArg
+from langchain_core.runnables import RunnableConfig
 from langchain_core.callbacks import CallbackManagerForToolRun, AsyncCallbackManagerForToolRun
+
+if TYPE_CHECKING:
+    from agent.subquery_graphql_agent.base import GraphQLSource
 
 from .graphql import process_graphql_schema
 from .node_types import GraphqlProvider
@@ -53,29 +57,36 @@ class GraphQLSchemaInfoTool(BaseTool):
     
     def _run(
         self,
-        run_manager: Optional[CallbackManagerForToolRun] = None,
+        run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> str:
         """Get GraphQL schema info synchronously."""
-        return asyncio.run(self._arun())
+        return asyncio.run(self._arun(config=config, run_manager=run_manager))
     
     async def _arun(
         self,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None,
+        config: Annotated[RunnableConfig, InjectedToolArg] = None,
     ) -> str:
         """Get raw GraphQL schema with automatic node type detection and appropriate guidance."""
         try:
+            # Extract block_height from config
+            block_height = 0
+            if config and "configurable" in config:
+                block_height = config["configurable"].get("block_height", 0)
+
             # Get raw schema from GraphQL source
             schema_content = self.graphql_source.entity_schema
             
             # Generate appropriate schema info based on node type
             if self._node_type == GraphqlProvider.THE_GRAPH:
-                return create_thegraph_schema_info_content(schema_content)
+                return self._generate_thegraph_info(schema_content)
             elif self._node_type == GraphqlProvider.SUBQL:
                 return self._generate_subql_info(schema_content)
             
         except Exception as e:
             return f"Error reading schema info: {str(e)}"
-    
+
     def _generate_subql_info(self, schema_content: str) -> str:
         """Generate SubQL-specific schema information."""
         return f"""📖 SUBQL (POSTGRAPHILE v4) SCHEMA & RULES:
@@ -153,10 +164,9 @@ class GraphQLSchemaInfoTool(BaseTool):
    - {{ indexers {{ groupedAggregates(groupBy: [PROJECT_ID]) {{ keys, sum {{ totalReward }} }} }} }}
 
 🚨 CRITICAL AGENT RULES:
-1. ALWAYS validate queries with graphql_query_validator before executing
-2. For missing user info ("my rewards"), ASK for wallet/ID - NEVER fabricate data
-3. Pass queries to graphql_execute as plain text (no backticks/quotes)
-4. Only use graphql_type_detail as FALLBACK when validation fails - prefer raw schema
+1. For missing user info ("my rewards"), ASK for wallet/ID - NEVER fabricate data
+2. Pass queries to graphql_query_validator_execute as plain text (no backticks/quotes)
+3. Only use graphql_type_detail as FALLBACK when validation fails - prefer raw schema
 
 ⚠️ CRITICAL FOREIGN KEY RULES:
 - Fields with @derivedFrom CANNOT be queried alone - they need subfield selection
@@ -211,171 +221,28 @@ class GraphQLSchemaInfoTool(BaseTool):
 ✅ {{ indexers {{ groupedAggregates(groupBy: [PROJECT_ID]) {{ keys, sum {{ totalReward }}, distinctCount {{ id }} }} }} }}
 ✅ {{ rewards {{ groupedAggregates(groupBy: [ERA, INDEXER_ID], having: {{ era: {{ greaterThan: 100 }} }}) {{ keys, sum {{ amount }} }} }} }}
 
-💡 NOW USE THE RAW SCHEMA ABOVE TO:
-1. Find @entity types (e.g., Project, Indexer) 
-2. Infer queries: project(id), projects(filter/pagination)
-3. Identify field types to determine foreign key relationships
-4. Construct your GraphQL query using the patterns above
-5. Validate the query, then execute it
 
-DO NOT call graphql_schema_info again - everything needed is above."""
-    
-    def _generate_thegraph_info(self, schema_content: str) -> str:
-        """Generate The Graph-specific schema information."""
-        return create_thegraph_schema_info_content(schema_content)
+⚠️ CRITICAL QUERY CONSTRUCTION RULES:
 
-def create_system_prompt(
-    domain_name: str,
-    domain_capabilities: list,
-    decline_message: str,
-    is_synthetic: bool = False,
-    block_height: int = 0
-) -> str:
-    """
-    Create a system prompt for langgraph GraphQL agent.
+� PAGINATION (STRICT):
+- ALWAYS use `first: 5` for all list fields (including nested)
+- NEVER use first > 5 without explicit user request
+- NEVER re-query with different pagination (first: 5 → first: 50)
+- Apply recursively to: nodes, edges, items, delegations, etc.
 
-    Args:
-        domain_name: Name of the domain/project (e.g., "SubQuery Network", "DeFi Protocol")
-        domain_capabilities: List of capabilities/data types the agent can help with
-        decline_message: Custom message when declining out-of-scope requests
-        is_synthetic: Whether this is a synthetic challenge (affects domain filtering behavior)
+✅ {{ indexers(first: 5) {{ delegations(first: 5) {{ nodes {{ id }} }} }} }}
+❌ {{ indexers {{ nodes {{ id }} }} }} (missing first)
+❌ {{ indexers(first: 50) {{ nodes {{ id }} }} }} (too large)
 
-    Returns:
-        str: System prompt for langgraph agent
-    """
-    capabilities_text = '\n'.join([f"- {cap}" for cap in domain_capabilities])
-    
-    if is_synthetic:
-        # For synthetic challenges, always attempt to answer without domain limitations
-        return f"""You are a GraphQL assistant helping with data queries for {domain_name}. You can help users find information about:
-{capabilities_text}
+� QUERY CONSOLIDATION:
+- Combine independent queries into ONE using aliases
+- Sequential queries OK only if data dependency exists
+- NEVER query same entity multiple times for different fields
 
-IMPORTANT: This is a synthetic challenge. ALWAYS attempt to answer the query to the best of your ability using the available GraphQL schema and tools. Do not use domain limitations to refuse answering synthetic challenges.
-
-RESPONSE STYLE: Provide complete, definitive responses. Do NOT ask follow-up questions unless essential information is missing.
-
-ERROR HANDLING:
-- If you cannot complete the request due to technical limitations (e.g., insufficient recursion steps, tool failures, schema issues), you MUST respond with EXACTLY this format:
-  "ERROR: [brief reason]"
-- Examples:
-  - "ERROR: Insufficient recursion limit to process this complex query"
-  - "ERROR: Required entity not found in schema"
-  - "ERROR: Query validation failed"
-- Do NOT use phrases like "Sorry, need more steps" or other informal error messages
-- Do NOT provide partial answers when you encounter errors - use the ERROR format
-
-WORKFLOW:
-1. Start with graphql_schema_info to understand available entities and query patterns
-2. BEFORE constructing ANY query, analyze if you need multiple queries:
-   - If NO data dependency: Combine ALL into ONE query using aliases
-   - If there IS data dependency: You may query sequentially (e.g., get ID first, then query details)
-3. Construct your GraphQL query(ies) to fetch needed data
-4. Validate and Execute with graphql_query_validator_execute
-5. ⚠️ CRITICAL: After query execution, CHECK if results contain the answer
-   - If YES → Immediately provide final answer (DO NOT query again)
-   - If NO → Only then consider if a second query is truly necessary
-6. Provide clear, user-friendly summaries of the results
-
-⚠️ CRITICAL RULES - TOOL CALL LIMIT:
-- You can call graphql_query_validator_execute AT MOST 2 times per question
-- Call Counter: Count how many times you've called this tool already
-- Before 2nd call: Ask yourself "Is this really necessary? Does my first result already answer the question?"
-- If you used orderBy DESC: The FIRST result is the maximum/highest - DO NOT query again with first:1
-- NEVER change pagination (first:5 → first:1) to "verify" - that's a waste!
-- NEVER incrementally adjust filter conditions (>= 85 → >= 84 → >= 83) - use broader range from start!
-- NEVER randomly try different filter values (>= -10 → >= 75 → >= 70) - think about logic first!
-- If first query returns empty/insufficient → Analyze WHY, then make ONE logical adjusted query
-- Think: "What filter range would logically cover the data I need?" before querying
-- If queries have NO data dependency → MUST combine into ONE query
-- If second query needs result from first → You MAY query twice (but minimize this)
-- NEVER query the same entity twice for different fields that could be fetched together
-- ALWAYS check if first query results already answer the question before querying again
-
-When Constructing GraphQL queries, You Must follow these strict rules:
-
-🚫 GraphQL Query Pagination Rules (STRICT)
-1. Every list field MUST have a `first:` parameter.
-2. The value of first must always be ≤ 5, unless the user explicitly asks for a larger number.
-3. This rule applies recursively, including all nested connection fields such as: nodes, edges, items, delegations, deploymentBoosterSummaries, etc.
-4. You must never use first: 100 or first: 50 or any value > 5 without explicit user request.
-5. If you are unsure whether a field supports pagination, assume it does and apply first: 5.
-6. ⚠️ CRITICAL: NEVER re-query with different pagination values (first: 5 → first: 50). Use your first result!
-
-❌ Bad Pagination Examples — These are strictly forbidden:
-# Missing pagination
-{{ indexers {{ nodes {{ id }}  }} }}
-{{ indexers {{ delegations {{ nodes {{ id }} }}   }} }}
-{{ indexer(id: xxx) {{ delegations {{ nodes {{ id }} }} }} }}
-
-# Overly large pagination (FORBIDDEN)
-{{ indexers(first: 50) {{ nodes {{ id }}  }} }}
-{{ indexers(first: 100) {{ nodes {{ id }}  }} }}
-{{ deployments(first: 50, orderBy: DESC) {{ nodes {{ id }} }} }}  ← NEVER use first: 50!
-
-# Re-querying with different pagination (CRITICAL VIOLATION)
-First query:  {{ deployments(first: 5) {{ nodes {{ id }} }} }}
-Second query: {{ deployments(first: 50) {{ nodes {{ id }} }} }}  ← FORBIDDEN! Use first result!
-
-✅ Correct Pagination Examples — You must always follow this pattern:
-{{ indexers(first: 5) {{ delegations(first: 5) {{ nodes {{ id }} }}   }} }}
-{{ indexer(id: xxx) {{ delegations(first: 5) {{ nodes {{ id }}  }} }} }}
-{{ deployments(first: 5, orderBy: AMOUNT_DESC) {{ nodes {{ id amount }} }} }}
-
-🚫 Query Consolidation Rules (MANDATORY - Minimize Queries)
-⚠️ CRITICAL: Minimize the number of GraphQL queries. Combine when possible!
-
-Rules:
-1. If queries are INDEPENDENT (no data dependency) → MUST combine into ONE query using aliases
-2. If second query DEPENDS on first query result (e.g., needs an ID) → Sequential queries are ALLOWED
-3. NEVER query the same entity multiple times for fields that could be fetched together
-4. Always prefer fewer queries over more queries
-
-✅ ALLOWED: Sequential queries with data dependency
-Example: "Find highest stake indexer, then get its delegations"
-First query: {{ indexers(first: 1, orderBy: TOTAL_STAKE_DESC) {{ nodes {{ id }} }} }}
-Second query: {{ indexer(id: "result_from_first") {{ id totalStake delegations(first: 5) {{ nodes {{ id }} }} }} }}
-→ This is OK because second query needs the ID from first query
-    
-❌ FORBIDDEN: Multiple queries without data dependency
-# Bad - these could be combined (WRONG)
-First query: {{ indexers(first: 5) {{ nodes {{ id }} }} }}
-Second query: {{ delegations(first: 5) {{ nodes {{ id }} }} }}  ← These are independent!
-
-# Bad - querying same entity for different fields (WRONG)
-First query: {{ indexer(id: "0x123") {{ id totalStake }} }}
-Second query: {{ indexer(id: "0x123") {{ delegations(first: 5) {{ nodes {{ id }} }} }} }}  ← Should combine!
-
-# Bad - querying same collection separately for nodes and aggregates (WRONG)
-First query: {{ deploymentBoosterSummaries(first: 5, orderBy: DESC) {{ nodes {{ id }} }} }}
-Second query: {{ deploymentBoosterSummaries(first: 5, orderBy: DESC) {{ groupedAggregates {{ ... }} }} }}
-← Should combine! You can query nodes AND aggregates in ONE query!
-
-✅ CORRECT: Combine independent queries
-{{
-    indexers(first: 5) {{ nodes {{ id totalStake }} }}
-    delegations(first: 5) {{ nodes {{ id amount }} }}
-}}
-
-✅ CORRECT: Combine all fields for same entity
-{{
-    indexer(id: "0x123") {{ 
-        id 
-        totalStake 
-        delegations(first: 5) {{ nodes {{ id amount }} }}
-    }}
-}}
-
-✅ CORRECT: Query nodes AND aggregates together
-{{
-    deploymentBoosterSummaries(first: 5, orderBy: TOTAL_AMOUNT_DESC) {{
-        nodes {{ id totalAmount consumer }}
-        groupedAggregates(groupBy: [DEPLOYMENT_ID]) {{
-            keys
-            sum {{ totalAdded totalRemoved totalAmount }}
-        }}
-    }}
-}}
-← Both nodes and aggregates in ONE query!
+✅ {{ indexer(id: "0x123") {{ id totalStake delegations(first: 5) {{ nodes {{ id }} }} }} }}
+✅ {{ indexers(first: 5) {{ nodes {{ id }} }} delegations(first: 5) {{ nodes {{ id }} }} }}
+❌ Query indexer twice for different fields
+❌ Query nodes and aggregates separately
 
 🚫 Minimal Query Rules (CRITICAL - ONLY QUERY ESSENTIAL FIELDS)
 1. Must Query only the fields that are directly relevant to answering the user's question.
@@ -584,35 +451,88 @@ If looking for recent indexers by commission era:
 - If you used orderBy: DESC, the FIRST result is the highest/maximum
 - first: 5 is enough for most questions - don't re-query with first: 50
 - Use what you already have!
+  
+💡 NOW USE THE RAW SCHEMA ABOVE TO:
+1. Find @entity types (e.g., Project, Indexer) 
+2. Infer queries: project(id), projects(filter/pagination)
+3. Identify field types to determine foreign key relationships
+4. Construct your GraphQL query using the patterns above
+5. Validate the query, then execute it
 
-🚨 CRITICAL BLOCK HEIGHT RULE:
-- CURRENT BLOCK HEIGHT: ##{block_height}##
-- IF CURRENT BLOCK HEIGHT is NOT 0 (non-zero value):
-  * ALL GraphQL queries MUST include the blockHeight parameter
-  * Set blockHeight to the CURRENT BLOCK HEIGHT value
-  * This ensures queries return data at the specified block state
-  
-  ✅ CORRECT (when CURRENT BLOCK HEIGHT = 5460865):
-  {{
-    indexers(first: 5, blockHeight: "5460865") {{ nodes {{ id totalStake }} }}
-  }}
-  
-  {{
-    indexer(id: "0x123", blockHeight: "5460865") {{ id totalStake }}
-  }}
-  
-  {{
-    deployments(first: 5, orderBy: AMOUNT_DESC, blockHeight: "5460865") {{ nodes {{ id amount }} }}
-  }}
-  
-  ❌ WRONG (missing blockHeight when CURRENT BLOCK HEIGHT is non-zero):
-  {{
-    indexers(first: 5) {{ nodes {{ id totalStake }} }}
-  }}
-  
-- IF CURRENT BLOCK HEIGHT is 0:
-  * Do NOT add blockHeight parameter to queries
-  * Query normally without blockHeight
+DO NOT call graphql_schema_info again - everything needed is above."""
+
+    def _generate_thegraph_info(self, schema_content: str) -> str:
+        """Generate The Graph-specific schema information."""
+        return create_thegraph_schema_info_content(schema_content)
+
+def create_system_prompt(
+    domain_name: str,
+    domain_capabilities: list,
+    decline_message: str,
+    is_synthetic: bool = False,
+    extra_instructions: str | None = None,
+) -> str:
+    """
+    Create a system prompt for langgraph GraphQL agent.
+
+    Args:
+        domain_name: Name of the domain/project (e.g., "SubQuery Network", "DeFi Protocol")
+        domain_capabilities: List of capabilities/data types the agent can help with
+        decline_message: Custom message when declining out-of-scope requests
+        is_synthetic: Whether this is a synthetic challenge (affects domain filtering behavior)
+
+    Returns:
+        str: System prompt for langgraph agent
+    """
+    capabilities_text = '\n'.join([f"- {cap}" for cap in domain_capabilities])
+    
+    if is_synthetic:
+        # For synthetic challenges, always attempt to answer without domain limitations
+        return f"""You are a GraphQL assistant helping with data queries for {domain_name}. You can help users find information about:
+{capabilities_text}
+
+IMPORTANT: This is a synthetic challenge. ALWAYS attempt to answer the query to the best of your ability using the available GraphQL schema and tools. Do not use domain limitations to refuse answering synthetic challenges.
+
+RESPONSE STYLE: Provide complete, definitive responses. Do NOT ask follow-up questions unless essential information is missing.
+
+ERROR HANDLING:
+- If you cannot complete the request due to technical limitations (e.g., insufficient recursion steps, tool failures, schema issues), you MUST respond with EXACTLY this format:
+  "ERROR: [brief reason]"
+- Examples:
+  - "ERROR: Insufficient recursion limit to process this complex query"
+  - "ERROR: Required entity not found in schema"
+  - "ERROR: Query validation failed"
+- Do NOT use phrases like "Sorry, need more steps" or other informal error messages
+- Do NOT provide partial answers when you encounter errors - use the ERROR format
+
+WORKFLOW:
+1. Start with graphql_schema_info to understand available entities and query patterns
+2. BEFORE constructing ANY query, analyze if you need multiple queries:
+   - If NO data dependency: Combine ALL into ONE query using aliases
+   - If there IS data dependency: You may query sequentially (e.g., get ID first, then query details)
+3. Construct your GraphQL query(ies) to fetch needed data
+4. Validate and Execute with graphql_query_validator_execute
+5. ⚠️ CRITICAL: After query execution, CHECK if results contain the answer
+   - If YES → Immediately provide final answer (DO NOT query again)
+   - If NO → Only then consider if a second query is truly necessary
+6. Provide clear, user-friendly summaries of the results
+
+⚠️ CRITICAL RULES - TOOL CALL LIMIT:
+- You can call graphql_query_validator_execute AT MOST 2 times per question
+- Call Counter: Count how many times you've called this tool already
+- Before 2nd call: Ask yourself "Is this really necessary? Does my first result already answer the question?"
+- If you used orderBy DESC: The FIRST result is the maximum/highest - DO NOT query again with first:1
+- NEVER change pagination (first:5 → first:1) to "verify" - that's a waste!
+- NEVER incrementally adjust filter conditions (>= 85 → >= 84 → >= 83) - use broader range from start!
+- NEVER randomly try different filter values (>= -10 → >= 75 → >= 70) - think about logic first!
+- If first query returns empty/insufficient → Analyze WHY, then make ONE logical adjusted query
+- Think: "What filter range would logically cover the data I need?" before querying
+- If queries have NO data dependency → MUST combine into ONE query
+- If second query needs result from first → You MAY query twice (but minimize this)
+- NEVER query the same entity twice for different fields that could be fetched together
+- ALWAYS check if first query results already answer the question before querying again
+
+{extra_instructions if extra_instructions else ""}
 
 For missing user info (like "my rewards", "my tokens"), always ask for the specific wallet address or ID rather than fabricating data."""
     else:
@@ -630,9 +550,8 @@ IF NOT RELATED to {domain_name}:
 IF RELATED to {domain_name} data:
 1. Start with graphql_schema_info to understand available entities and query patterns
 2. Construct proper GraphQL queries based on the schema
-3. Validate queries with graphql_query_validator before execution
-4. Execute queries with graphql_execute
-5. Provide clear, user-friendly summaries of the results, without explanation for the process.
+3. Execute queries with graphql_query_validator_execute
+4. Provide clear, user-friendly summaries of the results, without explanation for the process.
 
 For missing user info (like "my rewards", "my tokens"), always ask for the specific wallet address or ID rather than fabricating data."""
 
@@ -846,49 +765,6 @@ class GraphQLQueryValidatorAndExecutedTool(BaseTool):
     Validate a GraphQL query string for syntax and basic structure and execute it if valid.
     Input: Pass the GraphQL query as plain text without any formatting.
 
-    🛑 CRITICAL RULES BEFORE USING THIS TOOL:
-    1. After calling this tool, CHECK the result immediately
-    2. If the result contains the answer to the question → DO NOT call this tool again
-    3. If you used orderBy with DESC → The FIRST result is the maximum/highest value
-    4. DO NOT call this tool again with different 'first' values (first: 5 → first: 1) - use what you got!
-    5. DO NOT call this tool to "verify" or "double-check" - trust your first query result
-    6. DO NOT incrementally adjust filters (>= 85 → >= 84 → >= 83) - use broader range from start!
-    7. DO NOT randomly try filter values (>= -10 → >= 75 → >= 70) - THINK about logic first!
-    8. If first query is empty → STOP, THINK about reasonable filter range, then query ONCE more
-    9. DO NOT query same collection separately for nodes and aggregates - combine in ONE query!
-
-    Example of CORRECT usage:
-    Query: "Which deployment has highest amount?"
-    1. Call tool with: deployments(first: 5, orderBy: AMOUNT_DESC) { nodes { id amount } }
-    2. Result: [{ id: "0x1", amount: 1000 }, ...]
-    3. Answer immediately: "Deployment 0x1 has the highest amount of 1000"
-    4. DO NOT call tool again! ← Important!
-
-    Example of WRONG usage (DO NOT DO THIS):
-    1. Call tool with: deployments(first: 5, orderBy: DESC) → Get result
-    2. Call tool again with: deployments(first: 1, orderBy: DESC) ← WRONG! Already got answer!
-    
-    3. Or incrementally adjust filters (FORBIDDEN):
-       - First: indexers(filter: { commissionEra >= 85 }) → Empty
-       - Then: indexers(filter: { commissionEra >= 84 }) ← WRONG!
-       - Then: indexers(filter: { commissionEra >= 83 }) ← WRONG!
-       
-    4. Or randomly try values (ABSOLUTELY FORBIDDEN):
-       - First: indexers(filter: { commissionEra >= -10 }) → Too broad/nonsensical
-       - Then: indexers(filter: { commissionEra >= 75 }) ← Random guess!
-       - Then: indexers(filter: { commissionEra >= 70 }) ← Still guessing!
-       
-    5. Or query same collection separately for nodes and aggregates (FORBIDDEN):
-       - First: deploymentBoosterSummaries(first: 5) { nodes { id } }
-       - Then: deploymentBoosterSummaries(first: 5) { groupedAggregates { ... } }
-       ← WRONG! Query nodes AND aggregates together in ONE query!
-       
-    ✅ CORRECT: Think first, then query with reasonable range:
-       indexers(filter: { commissionEra >= 50 }) or remove filter if unsure
-    
-    ✅ CORRECT: Query nodes and aggregates together:
-       deploymentBoosterSummaries(first: 5) { nodes { id } groupedAggregates { ... } }
-
     CORRECT: { indexers(first: 1) { nodes { id } } }
     WRONG: `{ indexers(first: 1) { nodes { id } } }`
     WRONG: ```{ indexers(first: 1) { nodes { id } } }```
@@ -897,7 +773,7 @@ class GraphQLQueryValidatorAndExecutedTool(BaseTool):
     """
     args_schema: Type[BaseModel] = GraphQLQueryValidatorInput
     
-    def __init__(self, graphql_source):
+    def __init__(self, graphql_source: "GraphQLSource"):
         super().__init__()
         self._graphql_source = graphql_source
     

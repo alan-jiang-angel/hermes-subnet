@@ -20,6 +20,7 @@ class ErrorCode(Enum):
     GATEWAY_TIMEOUT = 504
     
     TOOL_ERROR = 1001
+    LLM_ERROR = 1002
 
     ## ============ miner side error ============
     AGENT_NOT_FOUND = 2001
@@ -30,3 +31,14 @@ class ErrorCode(Enum):
     ORGANIC_NO_SELECTED_MINER = 3003
     ORGANIC_NO_AXON = 3004
     ORGANIC_ERROR_RESPONSE = 3005
+
+class ChallengeType(Enum):
+    SYNTHETIC = 1
+    ORGANIC_STREAM = 2
+    ORGANIC_NONSTREAM = 3
+
+class RoleFlag(Enum):
+    NONE = 0
+    MINER = 1
+    VALIDATOR = 2
+

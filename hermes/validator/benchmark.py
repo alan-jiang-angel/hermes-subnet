@@ -23,10 +23,18 @@ class BenchMark:
         uid: int,
         address: str,
         cid: str,
+        challenge_type: int,
         challenge_id: str,
         question: str,
+        question_generator_model_name: str,
+        ground_truth_model_name: str,
+        score_model_name: str,
+        ground_truth: str,
         ground_cost: float,
         ground_truth_tools: list[dict[str, str]],
+        ground_input_tokens: int,
+        ground_input_cache_read_tokens: int,
+        ground_output_tokens: int,
         miners_answer: list[dict[str, any]],
     ):
         """
@@ -48,14 +56,20 @@ class BenchMark:
             "uid": uid,
             "address": address,
             "cid": cid,
+            "challengeType": challenge_type,
             "challengeId": challenge_id,
             "question": question,
+            "questionGeneratorModelName": question_generator_model_name,
+            "groundTruthModelName": ground_truth_model_name,
+            "scoreModelName": score_model_name,
+            "groundTruth": ground_truth,
             "groundTruthCost": ground_cost,
             "groundTruthTools": ground_truth_tools,
+            "groundInputTokens": ground_input_tokens,
+            "groundInputCacheReadTokens": ground_input_cache_read_tokens,
+            "groundOutputTokens": ground_output_tokens,
             "minersAnswer": miners_answer,
         }
-
-        logger.info(f"[Benchmark] Prepared benchmark data {benchmark_data}")
 
         # Determine if we should add this data
         should_upload = False
@@ -65,6 +79,8 @@ class BenchMark:
             should_upload = random.random() < benchmark_sample_rate
         else:
             return
+
+        logger.info(f"[Benchmark] Prepared benchmark data {benchmark_data}. {should_upload}")
 
         if should_upload:
             # Add to pending uploads for this cid

@@ -1,4 +1,4 @@
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 
 synthetic_challenge_template_V4 = """You are a question generator base on given graphql schema.

@@ -31,6 +31,7 @@ def create_thegraph_schema_info_content(schema_content: str) -> str:
 1. 📊 ENTITY QUERIES:
    - Single query: entityName(id: ID!,subgraphError: _SubgraphErrorPolicy_! = deny) → EntityType
    - Collection query: entityNames(skip: Int, first: Int, where: EntityFilter, orderBy: EntityOrderBy, orderDirection: OrderDirection, subgraphError: _SubgraphErrorPolicy_! = deny) → [EntityType]
+   - Multiple queries: You can send multiple independent queries in a single GraphQL request if they have no data dependencies between them
 
 2. 🔗 RELATIONSHIP QUERIES:
    - Direct field access: entity {{ field {{ id, otherFields }} }}
@@ -57,6 +58,15 @@ def create_thegraph_schema_info_content(schema_content: str) -> str:
    - name_in: [String!] - match any value in list
    - name_not_in: [String!] - not match any value in list
    - name_not: String! - not equal to
+   
+   BYTES FILTERS (Ethereum addresses, hashes, etc.):
+   - Direct field comparisons: name: "0x1234..." (full hex string with 0x prefix)
+   - name_not: Bytes! - not equal to
+   - name_gt, name_lt, name_gte, name_lte: Bytes! - byte-order comparison
+   - name_in: [Bytes!] - match any value in list
+   - name_not_in: [Bytes!] - not match any value in list
+   - name_contains: Bytes! - contains byte sequence (hex substring)
+   - name_not_contains: Bytes! - does not contain byte sequence
    
    NUMBER FILTERS (Int, BigInt, BigDecimal):
    - Direct field comparisons: amount: "100"
@@ -156,5 +166,7 @@ def create_thegraph_schema_info_content(schema_content: str) -> str:
 3. Use direct field access for relationships
 4. Apply The Graph-specific filtering and pagination
 5. Validate the query, then execute it
+6. AVOID DUPLICATE QUERIES: Do not generate queries that would retrieve the same data already obtained from previous queries in the same session
 
-DO NOT call graphql_schema_info again - everything needed is above."""
+DO NOT call graphql_schema_info again - everything needed is above.
+"""

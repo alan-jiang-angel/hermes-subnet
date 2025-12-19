@@ -282,16 +282,63 @@ def get_block_rule_prompt(block_height: int = 0, node_type: str = "") -> str:
     else:
         example = ""
     
+    block_param = "blockHeight" if node_type == "subql" else "block"
+
     if block_height == 0:
-        return """
-🚨 BLOCK HEIGHT RULE:
-- CURRENT BLOCK HEIGHT: ##0##
-- Since CURRENT BLOCK HEIGHT is 0, DO NOT add blockHeight/block parameter to any queries
-- Query normally without blockHeight/block parameter
-- ONLY add blockHeight/block parameter if the user's question explicitly mentions a specific block height
+        return f"""
+🚨 🚨 🚨 MANDATORY BLOCK HEIGHT REQUIREMENT 🚨 🚨 🚨
+
+CURRENT BLOCK HEIGHT: ##0##
+
+⚠️ ABSOLUTE RULE (QUERY-LEVEL, NO SOFT EXCEPTIONS):
+Every GraphQL query you generate MUST include the `{block_param}` parameter
+EXCEPT in exactly ONE specific case (defined below).
+
+STEP-BY-STEP CHECKLIST (follow this for EVERY query):
+
+1. ✓ Check: Did the user explicitly specify a block height?
+   - If YES → use the user-specified block height
+   - If NO → continue to step 2
+
+2. ✓ Check: Is CURRENT BLOCK HEIGHT non-zero?
+   - If YES ({block_height}) → use {block_height}
+   - If NO (0) → DO NOT add `{block_param}`
+
+3. ✓ ACTION:
+   - If a block height value was determined in steps 1 or 2:
+     → Add `{block_param}` to the ROOT FIELD of the query
+   - Otherwise:
+     → Generate the query WITHOUT `{block_param}`
+
+4. ✓ VERIFY:
+   - If a block height is required, double-check that `{block_param}` exists
+   - If missing when required → the query is INVALID and must be fixed
+
+EXCEPTION (THE ONLY ONE):
+- `{block_param}` MUST NOT be added ONLY IF:
+  - The user did NOT specify a block height
+  AND
+  - CURRENT BLOCK HEIGHT is exactly 0
+
+In this case:
+- Generate the GraphQL query WITHOUT `{block_param}`
+
+STRICT ENFORCEMENT:
+- This rule applies to ALL GraphQL queries
+  (including tool calls, validation queries, and intermediate queries)
+- There are NO other exceptions
+- Never guess or fabricate a block height
+- Never omit `{block_param}` when it is required
+
+{example}
+
+⛔ BEFORE SUBMITTING ANY QUERY:
+- Decide whether a block height is required
+- Scan the query for `{block_param}`
+- If required and missing → ADD IT NOW
+- Do NOT proceed until the rule is satisfied
 """
     else:
-        block_param = "blockHeight" if node_type == "subql" else "block"
         return f"""
 🚨 🚨 🚨 MANDATORY BLOCK HEIGHT REQUIREMENT 🚨 🚨 🚨
 

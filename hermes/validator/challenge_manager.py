@@ -91,7 +91,7 @@ class ChallengeManager:
         score_model_name = score_model_name or os.getenv("SCORE_LLM_MODEL", "o3")
         self.llm_score = ChatOpenAI(
             model=score_model_name,
-            temperature=1
+            temperature=0
         )
 
         self.agent_manager = AgentManager(
@@ -143,7 +143,6 @@ class ChallengeManager:
                 asyncio.create_task(self.workload_manager.compute_organic_task()),
                 asyncio.create_task(self.set_weight()),
                 asyncio.create_task(self.challenge_loop()),
-                # asyncio.create_task(self.test_ground_truth_token()),
                 asyncio.create_task(self.refresh_agents()),
             ]
             await asyncio.gather(*self.task)
@@ -230,7 +229,7 @@ class ChallengeManager:
                             continue
                         
                         if latest_block is not None:
-                            block_cache[cid_hash] = latest_block
+                            block_cache[cid_hash] = latest_block - 1000
                         
                         logger.info(f"[ChallengeManager] - {cid_hash} Selected block height: {block_cache[cid_hash]}")
 
@@ -524,7 +523,7 @@ class ChallengeManager:
 
             # data = utils.form_training_data(question, block_height, response.get('messages', []), metrics_data)
             # now = time.strftime("%Y-%m-%d", time.localtime())
-            # utils.append_to_jsonl(f"./.data/dataset_simple_{now}_IndexerAllocation.jsonl", data)
+            # utils.append_to_jsonl(f"./.data/dataset_validate_{now}_.jsonl", data)
 
             success = True
 

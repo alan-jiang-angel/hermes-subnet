@@ -164,10 +164,13 @@ def select_uid(
         max_count: int = 5
     ) -> tuple[int | None, float | None]:
 
-    available_success_rate_miners = [
-        uid for uid, (success_count, total_count) in synthetic_counter.items()
-        if uid in available_miners and (success_count / total_count if total_count > 0 else 0) >= success_rate_threshold
-    ]
+    available_success_rate_miners = []
+    for uid in available_miners:
+        success_count, total_count = synthetic_counter.get(uid, (0, 0))
+        success_rate = success_count / total_count if total_count > 0 else 0
+        if success_rate >= success_rate_threshold:
+            available_success_rate_miners.append(uid)
+
     if not available_success_rate_miners:
         return None, None
 

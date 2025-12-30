@@ -104,6 +104,7 @@ class GraphQLSchemaInfoTool(BaseTool):
 1. 📊 ENTITY QUERIES:
    - Single query: entityName(id: ID!) → EntityType
    - Collection query: entityNames(first: Int, filter: EntityFilter, orderBy: [EntityOrderBy!]) → EntityConnection
+   - ⚠️ PLURAL NAMING: If entity ends with 's' (e.g., Series), plural adds 'es' (e.g., serieses). Follow standard English pluralization rules.
    - Multiple queries: You can send multiple independent queries in a single GraphQL request if they have no data dependencies between them
 
 2. 🔗 RELATIONSHIP QUERIES:

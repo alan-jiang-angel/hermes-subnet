@@ -136,7 +136,7 @@ class BenchMark:
             }
             
             # Use compact format without spaces to match TypeScript's stableStringify
-            data_json = json.dumps(payload_to_hash, sort_keys=True, separators=(',', ':'))
+            data_json = json.dumps(payload_to_hash, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 
             # logger.info(f"[Benchmark] Data JSON for hashing: {data_json}")
             data_hash = hashlib.sha256(data_json.encode()).hexdigest()

@@ -7,6 +7,7 @@ from bittensor.core.subtensor import Subtensor
 from loguru import logger
 import dotenv
 import bittensor as bt
+from common import utils
 
 
 class Settings:
@@ -15,6 +16,7 @@ class Settings:
     _last_metagraph: Metagraph = None
     _last_update_time: int = 0
     _env_file: str | None = None
+    _external_ip: str | None = None
 
     def load_env_file(self, role: str | None = None):
         env_file = f".env.{role}" if role else ".env"
@@ -85,7 +87,9 @@ class Settings:
 
     @property
     def external_ip(self) -> str | None:
-        return os.environ.get("EXTERNAL_IP", None)
+        if self._external_ip is None:
+            self._external_ip = os.environ.get("EXTERNAL_IP", None) or utils.try_get_external_ip()
+        return self._external_ip
 
     @property
     def subtensor_network(self) -> str | None:

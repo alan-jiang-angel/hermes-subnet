@@ -10,6 +10,7 @@ import traceback
 from loguru import logger
 from typing import TYPE_CHECKING
 import torch
+from multiprocessing.synchronize import Event
 from agent.stats import TokenUsageMetrics
 from common.enums import ChallengeType
 from common.table_formatter import table_formatter
@@ -97,6 +98,7 @@ class WorkloadManager:
         token_usage_metrics: TokenUsageMetrics = None,
         ipc_meta_config: dict = {},
         benchmark: BenchMark = None,
+        event_stop: Event = None,
         v: "Validator" = None,
     ):
         self.challenge_manager = challenge_manager
@@ -104,6 +106,7 @@ class WorkloadManager:
         self.token_usage_metrics = token_usage_metrics
         self.ipc_meta_config = ipc_meta_config
         self.benchmark = benchmark
+        self.event_stop = event_stop
         self.V = v
 
         self.uid_sample_scores = {}
@@ -203,7 +206,7 @@ class WorkloadManager:
     async def compute_organic_task(self):
         debug = os.getenv("DEBUG_ORGANIC_COUNTER", "0") == "1"
 
-        while True:
+        while not self.event_stop.is_set():
             await asyncio.sleep(self.organic_task_compute_interval)
 
             if debug:

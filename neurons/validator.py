@@ -118,6 +118,7 @@ class Validator(BaseNeuron):
             synthetic_token_usage: list,
             ipc_common_config: dict,
             ipc_meta_config: dict,
+            event_stop: Event
         ):
         super().start(flag=RoleFlag.VALIDATOR)
         self.organic_score_queue = organic_score_queue
@@ -132,15 +133,18 @@ class Validator(BaseNeuron):
         self.block_cache: dict[str, list[int, int, str, str]] = {}
         try:
             from hermes.validator.api import app
+            
+            external_ip = self.settings.external_ip
+            if not external_ip:
+                logger.error("Failed to get external IP")
+                event_stop.set()
+                return
 
-            external_ip = utils.try_get_external_ip()
-            logger.info(f"external_ip: {external_ip}")
-
-            logger.info(f"Starting serve API on http://0.0.0.0:{self.settings.port}")
-            logger.info(f"Stats at http://0.0.0.0:{self.settings.port}/validator/stats")
+            logger.info(f"Starting serve API on http://{external_ip}:{self.settings.port}")
+            logger.info(f"Stats at http://{external_ip}:{self.settings.port}/validator/stats")
             config = uvicorn.Config(
                 app,
-                host="0.0.0.0",
+                host=external_ip,
                 port=self.settings.port,
                 loop="asyncio",
                 reload=False,
@@ -153,8 +157,9 @@ class Validator(BaseNeuron):
             await server.serve()
         except Exception as e:
             logger.error(f"Failed to serve API: {e}")
+            raise
 
-    async def run_miner_checking(self, ipc_miners_dict: dict):
+    async def run_miner_checking(self, ipc_miners_dict: dict, event_stop: Event):
         import bittensor as bt
 
         async def handle_availability(
@@ -180,7 +185,7 @@ class Validator(BaseNeuron):
             except Exception:
                 return None
 
-        while True:
+        while not event_stop.is_set():
             try:
                 miner_uids, miner_hotkeys = self.settings.miners()
                 all_miner_uids = []
@@ -410,6 +415,7 @@ def run_api(
         synthetic_token_usage: list,
         ipc_meta_config: dict,
         ipc_common_config: dict,
+        event_stop: Event
     ):
     proc = mp.current_process()
     HermesLogger.configure_loguru(
@@ -426,6 +432,7 @@ def run_api(
             synthetic_token_usage,
             ipc_common_config=ipc_common_config,
             ipc_meta_config=ipc_meta_config,
+            event_stop=event_stop
         ))
     except KeyboardInterrupt:
         logger.info("API process received shutdown signal, exiting gracefully...")
@@ -433,7 +440,7 @@ def run_api(
         logger.error(f"API process error: {e}")
         raise
 
-def run_miner_checking(ipc_miners_dict: dict):
+def run_miner_checking(ipc_miners_dict: dict, event_stop: Event):
     proc = mp.current_process()
     HermesLogger.configure_loguru(
         file=f"{LOGGER_DIR}/{proc.name}.log",
@@ -442,7 +449,7 @@ def run_miner_checking(ipc_miners_dict: dict):
 
     logger.info(f"run_miner_checking process id: {os.getpid()}")
     try:
-        asyncio.run(Validator().run_miner_checking(ipc_miners_dict))
+        asyncio.run(Validator().run_miner_checking(ipc_miners_dict, event_stop))
     except KeyboardInterrupt:
         logger.info("MinerChecking process received shutdown signal, exiting gracefully...")
     except Exception as e:
@@ -487,7 +494,8 @@ async def main():
                     ipc_synthetic_score,
                     synthetic_token_usage,
                     ipc_meta_config,
-                    ipc_common_config
+                    ipc_common_config,
+                    event_stop
                 ),
                 name="APIProcess",
                 daemon=True,
@@ -497,7 +505,7 @@ async def main():
 
             miner_checking_process = mp.Process(
                 target=run_miner_checking,
-                args=(ipc_miners_dict,),
+                args=(ipc_miners_dict, event_stop),
                 name="MinerCheckingProcess",
                 daemon=True,
             )
@@ -506,7 +514,7 @@ async def main():
 
             meta = MetaConfig()
             logger.info(f"main process id: {os.getpid()}")
-            while True:
+            while not event_stop.is_set():
                 try:
                     new_meta = await meta.pull()
                     logger.info(f"Pulled new meta config: {new_meta}")

@@ -5,7 +5,6 @@ from bittensor.core.extrinsics.serving import serve_extrinsic
 
 from common.enums import RoleFlag
 from common.settings import Settings, settings
-from common.utils import try_get_external_ip
 
 
 class BaseNeuron(ABC):
@@ -30,7 +29,7 @@ class BaseNeuron(ABC):
     def start(self, flag: RoleFlag):
         self.check_registered()
 
-        external_ip = self.settings.external_ip or try_get_external_ip()
+        external_ip = self.settings.external_ip
         serve_success = serve_extrinsic(
           subtensor=self.settings.subtensor,
           wallet=self.settings.wallet,

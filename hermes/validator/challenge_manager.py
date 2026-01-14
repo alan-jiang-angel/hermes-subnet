@@ -112,6 +112,7 @@ class ChallengeManager:
             token_usage_metrics=self.token_usage_metrics,
             ipc_meta_config=ipc_meta_config or {},
             benchmark=self.benchmark,
+            event_stop=event_stop,
             v=v,
         )
 
@@ -591,7 +592,7 @@ class ChallengeManager:
             return r
 
     async def set_weight(self):
-        while True:
+        while not self.event_stop.is_set():
             await asyncio.sleep(10)
             if time.time() - self._last_set_weight_time > self.set_weight_interval:
                 try:

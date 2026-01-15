@@ -22,7 +22,7 @@ dependencies = [
     "uuid>=1.30",
     "starlette>=0.30.0",
     "pydantic>=2",
-    "numpy>=1",
+    "numpy>=2.1.0",
 ]
 
 [tool.uv.sources]

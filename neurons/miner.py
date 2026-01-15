@@ -544,7 +544,7 @@ class Miner(BaseNeuron):
         current_dir = Path(__file__).parent
         save_project_dir = current_dir.parent / "projects" / self.role
 
-        model = os.environ.get("MINER_LLM_MODEL", "gpt-4o-mini")
+        model = os.environ.get("MINER_LLM_MODEL", "google/gemini-3-flash-preview")
         self.llm = ChatOpenAI(
             model=model,
             temperature=1

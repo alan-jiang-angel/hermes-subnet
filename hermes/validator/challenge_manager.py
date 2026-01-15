@@ -70,7 +70,7 @@ class ChallengeManager:
         self.settings = settings
 
         # Configure synthetic challenge loop interval (default: 10 minutes)
-        self.challenge_interval = int(os.getenv("CHALLENGE_INTERVAL", 60 * 10))  # seconds
+        self.challenge_interval = int(os.getenv("CHALLENGE_INTERVAL", 60 * 20))  # seconds
         self.refresh_agents_interval = int(os.getenv("REFRESH_AGENTS_INTERVAL", 60 * 5))  # seconds
 
         self.forward_miner_timeout = int(os.getenv("FORWARD_MINER_TIMEOUT", 60 * 3))  # seconds
@@ -82,13 +82,13 @@ class ChallengeManager:
         self.token_usage_metrics = TokenUsageMetrics(datas=synthetic_token_usage)
         self.benchmark = BenchMark(self.settings.wallet, ipc_meta_config)
 
-        synthetic_model_name = synthetic_model_name or os.getenv("LLM_MODEL", "gpt-5")
+        synthetic_model_name = synthetic_model_name or os.getenv("LLM_MODEL", "google/gemini-3-flash-preview")
         self.llm_synthetic = ChatOpenAI(
             model=synthetic_model_name,
             temperature=1
         )
 
-        score_model_name = score_model_name or os.getenv("SCORE_LLM_MODEL", "o3")
+        score_model_name = score_model_name or os.getenv("SCORE_LLM_MODEL", "google/gemini-3-flash-preview")
         self.llm_score = ChatOpenAI(
             model=score_model_name,
             temperature=0

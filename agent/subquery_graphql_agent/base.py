@@ -222,7 +222,7 @@ class GraphQLAgent:
             raise ValueError("OPENAI_API_KEY environment variable is required")
 
         # Initialize LLM
-        model_name = os.getenv("LLM_MODEL", "gpt-4o-mini")
+        model_name = os.getenv("LLM_MODEL", "google/gemini-3-flash-preview")
         logger.info(f"Initializing GraphQLAgent with model: {model_name}")
         self.llm = ChatOpenAI(
             model=model_name,

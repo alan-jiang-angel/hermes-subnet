@@ -114,7 +114,8 @@ class ChallengeManager:
 
         self.scorer_manager = ScorerManager(
             llm_score=self.llm_score,
-            score_state_path=score_state_path
+            score_state_path=score_state_path,
+            ipc_meta_config=ipc_meta_config
         )
 
         self.workload_manager = WorkloadManager(
@@ -588,11 +589,11 @@ class ChallengeManager:
         question: str,
         block_height: int = 0,
     ):
-        synapse = SyntheticNonStreamSynapse(id=challenge_id, cid_hash=cid_hash, question=question, block_height=block_height)
+        synapse = SyntheticNonStreamSynapse(id=challenge_id, uid=uid, cid_hash=cid_hash, question=question, block_height=block_height)
         start_time = time.perf_counter()
 
         # Initialize response object with error defaults
-        r = SyntheticNonStreamSynapse(id=challenge_id, cid_hash=cid_hash, question=question, block_height=block_height)
+        r = SyntheticNonStreamSynapse(id=challenge_id, uid=uid, cid_hash=cid_hash, question=question, block_height=block_height)
         r.status_code = ErrorCode.FORWARD_SYNTHETIC_FAILED.value
         r.error = "Unknown error"
 
@@ -619,6 +620,7 @@ class ChallengeManager:
             if not hasattr(r, 'error'):
                 r.error = str(e)
         finally:
+            r.uid = uid
             r.elapsed_time = utils.fix_float(time.perf_counter() - start_time)
             return r
 

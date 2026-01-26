@@ -8,7 +8,7 @@ class EMAUpdater:
         # {uid: (score, hotkey) }
         self._last_scores = {}
 
-    def update(self, cur_uids: list[int], cur_hotkeys: list[str], cur_scores: list[float]):
+    def update(self, cur_uids: list[int], cur_hotkeys: list[str], cur_scores: list[float], suspicious_uids: list[int]):
         cur_dict_score = dict(zip(cur_uids, cur_scores))
         cur_dict_hotkeys = dict(zip(cur_uids, cur_hotkeys))
         new_scores = {}
@@ -34,6 +34,9 @@ class EMAUpdater:
                 # hotkey changed, reset last_val to cur_val
                 last_val = cur_val
 
+            if suspicious_uids and uid in suspicious_uids:
+                last_val = 0
+                cur_val = 0
             # calculate EMA
             new_scores[uid] = (utils.fix_float((1 - self.alpha) * last_val + self.alpha * cur_val), cur_hk)
 

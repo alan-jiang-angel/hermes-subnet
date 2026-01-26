@@ -530,6 +530,10 @@ async def main():
                         new_benchmark_mode = new_meta.data.get("benchmark_mode", "sample")
                         new_benchmark_sample_rate = new_meta.data.get("benchmark_sample_rate", 0.8)
                         new_benchmark_batch_size = new_meta.data.get("benchmark_batch_size", 0)
+                        new_suspicious_uids = new_meta.data.get("suspicious_uids", [])
+                        ipc_meta_config.update({
+                            "suspicious_uids": new_suspicious_uids
+                        })
 
                         new_organic_success_score_threshold = new_meta.data.get("organic_success_score_threshold", 5)
                         new_organic_success_rate_threshold = new_meta.data.get("organic_success_rate_threshold", 0.7)

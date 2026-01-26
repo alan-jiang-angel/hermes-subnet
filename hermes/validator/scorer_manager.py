@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from agent.stats import Phase, TokenUsageMetrics
 from common import utils
+from common.enums import ErrorCode
 from common.prompt_template import SCORE_PROMPT
 from common.prompt_injection_defense import sanitize_for_evaluation
 from common.protocol import SyntheticNonStreamSynapse
@@ -22,11 +23,12 @@ class ScorerManager:
     synthetic_ema: EMAUpdater
     score_state_path: str | Path
 
-    def __init__(self, llm_score: ChatOpenAI, score_state_path: str | Path = None):
+    def __init__(self, llm_score: ChatOpenAI, score_state_path: str | Path = None, ipc_meta_config: dict = None):
         self.overall_ema = EMAUpdater(alpha=0.7)
         self.synthetic_ema = EMAUpdater(alpha=0.7)
         self.llm_score = llm_score
         self.score_state_path = score_state_path
+        self.ipc_meta_config = ipc_meta_config
         self.load_state()
 
     async def compute_challenge_score(self, 
@@ -61,7 +63,14 @@ class ScorerManager:
         if not miner_synapse.response or miner_synapse.status_code != 200:
             logger.debug(f"[ScorerManager] - cal_ground_truth_score: empty or error response from miner_synapse, status_code: {miner_synapse.status_code}, response: {miner_synapse.response}")
             return 0.0
-        
+
+        suspicious_uids = self.ipc_meta_config.get("suspicious_uids", []) if self.ipc_meta_config else []
+        if miner_synapse.uid in suspicious_uids:
+            logger.debug(f"[ScorerManager] - cal_ground_truth_score: miner_synapse {miner_synapse.uid} is in suspicious_uids")
+            miner_synapse.status_code = ErrorCode.SUSPICIOUS.value
+            miner_synapse.error = "Miner is suspicious"
+            return 0.0
+
         # SECURITY: Sanitize miner response to detect/log prompt injection attempts
         # sanitized_response = sanitize_for_evaluation(miner_synapse.response, max_length=5000)
         
@@ -90,8 +99,9 @@ class ScorerManager:
         if not uids or not project_score_matrix:
             return
 
+        suspicious_uids = self.ipc_meta_config.get("suspicious_uids", []) if self.ipc_meta_config else []
         synthetic_scores = np.array(project_score_matrix).sum(axis=0).tolist()
-        self.synthetic_ema.update(uids, hotkeys, synthetic_scores)
+        self.synthetic_ema.update(uids, hotkeys, synthetic_scores, suspicious_uids)
 
         if workload_score is not None:
             merged = project_score_matrix + [workload_score]
@@ -101,7 +111,7 @@ class ScorerManager:
         score_matrix = np.array(merged)
         score_matrix = score_matrix.sum(axis=0)
         
-        new_scores = self.overall_ema.update(uids, hotkeys, score_matrix.tolist())
+        new_scores = self.overall_ema.update(uids, hotkeys, score_matrix.tolist(), suspicious_uids)
         self.save_state(new_scores)
         logger.debug(f"[ScorerManager] - {challenge_id} uids: {uids}, project_score_matrix: {project_score_matrix}, workload_score: {workload_score}, merged: {merged}, score_matrix: {score_matrix.tolist()}, updated_ema_scores: {new_scores}")
         return new_scores

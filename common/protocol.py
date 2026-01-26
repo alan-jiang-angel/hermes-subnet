@@ -32,6 +32,7 @@ class CapacitySynapse(bt.Synapse):
     response: Optional[dict] = None
 class BaseSynapse(bt.Synapse):
     id: str | None = None
+    uid: int | None = None
     cid_hash: str | None = None
     block_height: int | None = 0
 

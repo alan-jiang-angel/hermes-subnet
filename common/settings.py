@@ -1,4 +1,3 @@
-
 import os
 import time
 from typing import List, Tuple
@@ -9,6 +8,8 @@ import dotenv
 import bittensor as bt
 from common import utils
 from common.enums import RoleFlag
+import tomllib
+
 
 
 class Settings:
@@ -18,6 +19,7 @@ class Settings:
     _last_update_time: int = 0
     _env_file: str | None = None
     _external_ip: str | None = None
+    _version: str | None = None
 
     def load_env_file(self, role: str | None = None):
         env_file = f".env.{role}" if role else ".env"
@@ -109,6 +111,20 @@ class Settings:
     @property
     def burn_uid(self) -> int:
         return int(os.environ.get("BURN_UID", 0))
+    
+    @property
+    def version(self) -> str:
+        if self._version is None:
+            try:
+                pyproject_path = os.path.join(self.base_dir, "pyproject.toml")
+                with open(pyproject_path, "rb") as f:
+                    data = tomllib.load(f)
+                    self._version = data["project"]["version"]
+                    logger.debug(f"Loaded version {self._version} from {pyproject_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load version from pyproject.toml: {e}, using default")
+                self._version = "unknown"
+        return self._version
 
     def miners(self) -> Tuple[List[int], List[str]]:
         uids = []

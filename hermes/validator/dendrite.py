@@ -15,7 +15,7 @@ class HighConcurrencyDendrite(bt.dendrite):
                 limit=self.max_connections,
                 limit_per_host=100, #  100 concurrent requests per IP (to prevent overloading a single IP)
                 ttl_dns_cache=300,  # 5 minutes
-                force_close=True,
+                force_close=False,  # Keep connections alive for reuse (reduces latency)
                 enable_cleanup_closed=True
             )
             self._custom_session = aiohttp.ClientSession(

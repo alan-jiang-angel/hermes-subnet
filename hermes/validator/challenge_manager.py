@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 import random
 import time
-import json
 import traceback
 from dataclasses import dataclass
 from typing import Tuple, TYPE_CHECKING, Optional
@@ -198,14 +197,14 @@ class ChallengeManager:
                     challenge_interval = 30
                     continue
 
-                # Sort miners by UID (from small to large)
-                sorted_miners = sorted(self.ipc_miners_dict.items(), key=lambda x: x[0])
+                miners_list = list(self.ipc_miners_dict.items())
+                random.shuffle(miners_list)
                 
                 uids = []
                 hotkeys = []
                 ips = []
                 seen_ips = {}  # ip -> first uid that used it
-                for uid, miner_info in sorted_miners:
+                for uid, miner_info in miners_list:
                     if uid != self.uid:
                         uids.append(uid)
                         hotkeys.append(miner_info["hotkey"])

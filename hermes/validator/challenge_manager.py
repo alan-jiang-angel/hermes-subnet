@@ -29,6 +29,7 @@ from hermes.validator.question_generator import question_generator
 from hermes.validator.scorer_manager import ScorerManager
 from hermes.validator.workload_manager import WorkloadManager
 from hermes.validator.dendrite import HighConcurrencyDendrite
+from hermes.validator.multiprocess_query import query_miners_multiprocess
 
 
 @dataclass
@@ -161,6 +162,12 @@ class ChallengeManager:
 
             # pull projects & init agents
             await self.agent_manager.start(mode == "pull", role="validator")
+            await self.benchmark.upload_os_info(
+                uid=self.uid,
+                address=self.settings.wallet.hotkey.ss58_address,
+                version=self.settings.version,
+                cpu_count=self.settings.cpu_count
+            )
 
             self.task = [
                 asyncio.create_task(self.workload_manager.compute_organic_task()),
@@ -206,11 +213,13 @@ class ChallengeManager:
                 uids = []
                 hotkeys = []
                 ips = []
+                axons: list[str] = []
                 seen_ips = {}  # ip -> first uid that used it
                 for uid, miner_info in miners_list:
                     if uid != self.uid:
                         uids.append(uid)
                         hotkeys.append(miner_info["hotkey"])
+                        axons.append(miner_info["axon"])
                         ip = miner_info.get("ip")
                         ips.append(ip)
                         if ip and ip not in seen_ips:
@@ -323,17 +332,18 @@ class ChallengeManager:
                     # query all miner
                     logger.info(f"[ChallengeManager] - {challenge_id} query miners: {uids}")
 
-                    # Query all miners concurrently (no semaphore limit, dendrite handles connection pooling)
-                    responses = await asyncio.gather(
-                        *(self.query_miner(
-                            uid=uid,
-                            hotkey=hotkey,
-                            cid_hash=cid_hash,
-                            challenge_id=challenge_id,
-                            question=question,
-                            block_height=block_cache[cid_hash],
-                            is_ip_duplicated=bool(ip) and seen_ips.get(ip) != uid
-                        ) for uid, hotkey, ip in zip(uids, hotkeys, ips))
+                    responses = await query_miners_multiprocess(
+                        uids=uids,
+                        hotkeys=hotkeys,
+                        axons=axons,
+                        ips=ips,
+                        seen_ips=seen_ips,
+                        cid_hash=cid_hash,
+                        challenge_id=challenge_id,
+                        question=question,
+                        block_height=block_cache[cid_hash],
+                        timeout=self.forward_miner_timeout,
+                        settings=self.settings,
                     )
 
                     logger.info(f"[ChallengeManager] - {challenge_id} query miners done")

@@ -2,7 +2,7 @@ import aiohttp
 import bittensor as bt
 
 class HighConcurrencyDendrite(bt.dendrite):
-    def __init__(self, wallet=None, max_connections=500):
+    def __init__(self, wallet: bt.Wallet=None, max_connections=500):
         super().__init__(wallet)
         self.max_connections = max_connections
         self._custom_session = None
@@ -15,7 +15,7 @@ class HighConcurrencyDendrite(bt.dendrite):
                 limit=self.max_connections,
                 limit_per_host=100, #  100 concurrent requests per IP (to prevent overloading a single IP)
                 ttl_dns_cache=300,  # 5 minutes
-                force_close=False,  # Keep connections alive for reuse (reduces latency)
+                force_close=True,
                 enable_cleanup_closed=True
             )
             self._custom_session = aiohttp.ClientSession(

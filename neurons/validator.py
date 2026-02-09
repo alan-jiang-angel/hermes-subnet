@@ -28,7 +28,6 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 import uvicorn
 from multiprocessing.synchronize import Event
-from common.meta_config import MetaConfig
 from common.table_formatter import table_formatter
 from common.enums import ErrorCode, RoleFlag
 from common.logger import HermesLogger
@@ -188,7 +187,8 @@ class Validator(BaseNeuron):
                         "uid": uid,
                         "projects": r.response.get("capacity", {}).get("projects", []),
                         "hotkey": r.axon.hotkey,
-                        "ip": ip
+                        "ip": ip,
+                        "axon": axon.to_string()
                     }
                 else:
                     logger.debug(f"UID {uid} request failed.")
@@ -199,7 +199,8 @@ class Validator(BaseNeuron):
                 "uid": uid,
                 "projects": [],
                 "hotkey": "",
-                "ip": ip
+                "ip": ip,
+                "axon": axon.to_string()
             }
 
         while not event_stop.is_set():
@@ -230,7 +231,8 @@ class Validator(BaseNeuron):
                     ipc_miners_dict[r["uid"]] = {
                         "hotkey": r["hotkey"],
                         "projects": r["projects"],
-                        "ip": r["ip"]
+                        "ip": r["ip"],
+                        "axon": r["axon"]
                     }
                 logger.debug(f"[CheckMiner] Updated miners: {ipc_miners_dict}")
 
@@ -499,7 +501,7 @@ async def main():
                     event_stop
                 ),
                 name="ChallengeProcess",
-                daemon=True,
+                daemon=False,
             )
             challenge_process.start()
             processes.append(challenge_process)
@@ -530,8 +532,10 @@ async def main():
             miner_checking_process.start()
             processes.append(miner_checking_process)
 
+            from common.meta_config import MetaConfig
             meta = MetaConfig()
             logger.info(f"main process id: {os.getpid()}")
+
             while not event_stop.is_set():
                 try:
                     new_meta = await meta.pull()

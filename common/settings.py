@@ -6,8 +6,6 @@ from bittensor.core.subtensor import Subtensor
 from loguru import logger
 import dotenv
 import bittensor as bt
-import time
-import os
 from common import utils
 from common.enums import RoleFlag
 import tomllib
